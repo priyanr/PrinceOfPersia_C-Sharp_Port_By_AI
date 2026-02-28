@@ -1,0 +1,12 @@
+# Build output and IDE state
+bin/
+obj/
+.vs/
+
+# Local Claude Code settings
+.claude/
+
+# Jordan Mechner's original Apple II source (third-party):
+#   https://github.com/jmechner/Prince-of-Persia-Apple-II
+# Clone it into originalcode/ to use the references in CLAUDE.md.
+originalcode/

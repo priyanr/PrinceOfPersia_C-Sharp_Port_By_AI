@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="LevelEditor/LevelEditor.csproj" />
+  <Project Path="POPGame/POPGame.csproj" />
+</Solution>
