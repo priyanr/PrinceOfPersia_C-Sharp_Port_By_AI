@@ -46,6 +46,13 @@ public class Level
     public TileId GetTileId(int screen0, int row, int col)
         => (TileId)(LiveBlueType[screen0 * CellsPerScreen + row * Cols + col] & 0x1F);
 
+    /// <summary>
+    /// The BLUETYPE byte's top three bits. For masonry these choose the variant the
+    /// original lays: 0 is always the plain body, non-zero lets it pick a speckled one.
+    /// </summary>
+    public int GetTileModifier(int screen0, int row, int col)
+        => LiveBlueType[screen0 * CellsPerScreen + row * Cols + col] >> 5;
+
     public byte GetSpec(int screen0, int row, int col)
         => LiveBlueSpec[screen0 * CellsPerScreen + row * Cols + col];
 
@@ -78,11 +85,16 @@ public class Level
     // -------------------------------------------------------------------------
     // Loader
     // -------------------------------------------------------------------------
-    public static Level Load(string path)
+    public static Level Load(string path) => Load(File.ReadAllBytes(path));
+
+    /// <summary>
+    /// Parses a 2304-byte level blob. Both the Apple II LEVELn files and the
+    /// resources inside the DOS LEVELS.DAT use this exact layout.
+    /// </summary>
+    public static Level Load(byte[] data)
     {
-        byte[] data = File.ReadAllBytes(path);
         if (data.Length < 2304)
-            throw new IOException($"File too short: {data.Length} bytes (need 2304)");
+            throw new IOException($"Level data too short: {data.Length} bytes (need 2304)");
 
         var lv = new Level();
         Buffer.BlockCopy(data,    0, lv.BlueType, 0, 720);

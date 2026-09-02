@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>DatDump</AssemblyName>
+    <RootNamespace>DatDump</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Share the DAT reader/decoder with the game rather than duplicating it. -->
+  <ItemGroup>
+    <Compile Include="../../POPGame/Dos/DatFile.cs" Link="Dos/DatFile.cs" />
+    <Compile Include="../../POPGame/Dos/DatImage.cs" Link="Dos/DatImage.cs" />
+    <Compile Include="../../POPGame/Dos/PngWriter.cs" Link="Dos/PngWriter.cs" />
+  </ItemGroup>
+
+</Project>
