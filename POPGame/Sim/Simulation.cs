@@ -35,6 +35,7 @@ public sealed class Simulation
         _hazards = new Hazards(level);
 
         ResetKid();
+        StartEvents();
     }
 
     public void LoadLevel(Level level, int levelNumber)
@@ -48,6 +49,16 @@ public sealed class Simulation
         _physics = new Physics(View, _seq);
         _hazards = new Hazards(level);
         ResetKid();
+        StartEvents();
+    }
+
+    /// <summary>
+    /// DO_STARTPOS's special case for level 1: the kid falls in and the closer in room 5
+    /// (row 0, col 2) is pressed, so the open gate beside the first room slams shut.
+    /// </summary>
+    private void StartEvents()
+    {
+        if (LevelNumber == 1) _hazards.PressButton(5, 0, 2);
     }
 
     private void ResetKid()

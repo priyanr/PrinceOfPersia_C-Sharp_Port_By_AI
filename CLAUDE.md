@@ -9,6 +9,9 @@ rather than hand-transcribed data. Nothing copyrighted lives in this repo.
 - **tools/DatDump** — dumps any DOS `.DAT` to PNGs + labelled contact sheets
 - Apple II 6502 reference source: `originalcode/Prince-of-Persia-Apple-II-master/01 POP Source/Source/`
 
+Notable changes are logged in `CHANGELOG.md`, newest first. Add an entry when you change
+behaviour or overturn something this file used to claim.
+
 ## DOS assets (required to run)
 Located via `POP_DOS_DIR`, else `E:\DOS\games\Prince` (see `Dos/DosGame.cs`).
 Must contain `PRINCE.EXE`, `LEVELS.DAT`, `VDUNGEON.DAT`, `KID.DAT`.
@@ -24,9 +27,14 @@ POPGame.exe --dump out 1 ".2 R24 RU3 R10" 1
 Input script tokens are `<keys><count>`; keys are `L R U D S` (S = shift) or `.` for none.
 
 ## Where the authentic data comes from
-`PRINCE.EXE` is **not packed**, so the tables are readable in place. Offsets were
-found by matching byte patterns from the Apple II source and verified against two
-independent anchors each (`Dos/DosTables.cs`, `Validate()` re-checks at startup):
+`PRINCE.EXE` **is packed with Microsoft EXEPACK** (the stub at CS:0 has the "RB"
+signature and "Packed file is corrupt"). EXEPACK only squeezes runs of repeated bytes,
+so most of the image survives verbatim in the file — which is why the frame and
+sequence tables below can be read in place at these *file* offsets. Anything holding a
+long zero run (the tile drawing table has ten) must be read from the unpacked image:
+`Dos/ExePack.Unpack`. Offsets were found by matching byte patterns from the Apple II
+source and verified against two independent anchors each (`Dos/DosTables.cs`,
+`Validate()` re-checks at startup):
 
 | What | Offset | Shape |
 |------|--------|-------|
@@ -89,6 +97,8 @@ POPGame/
   Dos/DatPalette            16-colour 6-bit VGA palette
   Dos/DosImageBank.cs       a DAT decoded to CPU images, addressed by resource id
   Dos/DosTables.cs          frame table + sequence table out of PRINCE.EXE
+  Dos/ExePack.cs            EXEPACK unpacker for PRINCE.EXE
+  Dos/DosDrawTables.cs      the room-drawing tables (tile_table etc.) out of PRINCE.EXE
   Dos/DosLevels.cs          levels out of LEVELS.DAT
   Dos/PngWriter.cs          dependency-free RGBA PNG encoder
   Sim/Coord.cs              the original coordinate system
@@ -98,9 +108,9 @@ POPGame/
   Sim/KidControl.cs         PLAYERCTRL: input -> which sequence to jump to
   Sim/Physics.cs            gravity, landing, walls, room transitions
   Sim/Simulation.cs         per-tick orchestration
-  Rendering/Framebuffer.cs  320x200 RGBA buffer + indexed blitter
-  Rendering/DosTileArt.cs   which DOS images compose each tile  <-- main tuning knob
-  Rendering/DosRenderer.cs  room + character into the framebuffer
+  Rendering/Framebuffer.cs  320x200 RGBA buffer + indexed blitter with the original's blit modes
+  Rendering/DosRoomDrawer.cs  port of the original's DRAW_ROOM / draw_tile_* -> list of placements
+  Rendering/DosRenderer.cs  back layer, kid, front layer into the framebuffer
   Engine/DosGameLoop.cs     Raylib window; uploads the framebuffer as one texture
   Engine/HeadlessRun.cs     scripted input -> one PNG per tick, no GPU
   Data/Level.cs, Data/TileId.cs   level blob parsing (shared with the Apple II files)
@@ -135,83 +145,97 @@ there isn't** — everything after that follows from the data. `chy,193` in clim
 `-63` read as a signed byte, i.e. exactly one block.
 
 ## Tile rendering
-`DosTileArt.cs` places pieces by **raw VDUNGEON.DAT resource id**, relative to the
-cell's top-left corner (`cellX = 32*col`, `cellY = Coord.BlockTop(row)`).
-Every offset below was **read back off the real game**, not guessed: a DOSBox frame is
-captured at native 320x200 and each decoded resource is template-matched against it, so
-a hit is an exact pixel-for-pixel placement. `DosRenderer` splits pieces into a back
-layer and a front layer (pillar tops, torch flames) that draws over the characters.
+Rooms are drawn by `Rendering/DosRoomDrawer.cs`, a straight reimplementation of the
+original's room-drawing routine (DRAW_ROOM and the `draw_tile_*` family, as
+reconstructed in SDLPoP's `src/seg008.c`), driven by tables read out of PRINCE.EXE
+(`Dos/DosDrawTables.cs`). **Nothing is hand-placed.** Checked against DOSBox captures,
+the backgrounds of level 1 rooms 1 and 2 and the level 3 start room (exit door included)
+match **pixel for pixel**. The only differences left are torch flame phase and
+simulation state.
 
-| Tile | Pieces (id @ x,y within the cell) |
-|------|-----------------------------------|
-| solid wall (`Block`) | body `364/366/368/370` @ 0,+1 · a seam `371`/`372` on the lower two courses (@ +22, +43) · cap `369` @ 0,+61 |
-| any floor-ish tile | face @ 0,+48 · cap `243` @ 0,+61 |
-| `Posts` | `292` @ 0,+1 · `295` @ +8,+1 · flank `293` @ **+32**,+1 · cap `243` @ 0,+61 |
-| `Gate` | threshold `362` @ +7,+52 · lattice `260-h`/`252`/`251` @ +7, hung by BLUESPEC (see below) |
-| `Rubble` | floor + `300` @ 0,+52 |
-| `Torch` | floor + sconce `346` @ **+32**,+21 + flame (PRINCE.DAT 150 bank) @ **+40**,+3 |
-| back wall | cross `244` @ 0,+14, on open cells only |
-| ceiling | cap `243` @ 32*col, `BlockTop(-1)+61` (== y 1) across every column |
-| `Spikes` | floor + `1305`/`1304`/`1303`/`1301` by BLUESPEC, foot on the surface |
-| `Flask` / `Sword` | floor + PRINCE.DAT 150-bank index 12 (4-frame loop) / 11 |
-| `Exit` | floor + stairs `344` (41x45), spanning the Exit/Exit2 pair |
+Before this, tiles were template-matched off screenshots one piece at a time. That got
+the verified pieces right and everything else wrong (brick pattern, gate layers, any tile
+not in a captured room). Don't go back to tuning offsets; if something is off, the port
+or the sim state is wrong.
 
-Everything above the `Spikes` row is verified against a capture. The last three rows are
-reasoned placements — those tiles only occur in rooms of level 1 that cannot be reached
-from the start (room 5 is behind a shut gate, room 9 past the guard), so nothing has been
-matched against the original yet. Pressure plates still draw as bare floor.
+### The tables (all in one block of the unpacked data segment)
+`tile_table` is 31 rows x 12 bytes: `base_id, floor_left, base_y, right_id, floor_right,
+right_y, stripe_id, topright_id, bottom_id, fore_id, fore_x, fore_y`. It is located by its
+first two rows (12 zeros, then `41,1,0,42,1,2,145,0,43,0,0,0`), and every small frame
+array follows it at a fixed offset (loose, chomper, spikes, `door_fram_top/slice`,
+`blueline_fram1/_y/3`, `wall_fram_bottom/main`, `potion_fram_bubb`, the wall-mark
+`LPOS`/`RPOS` words). The offsets are in `DosDrawTables`, and `Validate()` checks a
+second anchor in each.
 
-Four things are not what you would guess, and cost most of the time to find:
+Image ids: chtab 6 id N = VDUNGEON resource **200+N**; chtab 7 (walls) id N =
+**360+N**; chtab 1 (flame/potion/sword) id N = PRINCE.DAT **150+N**.
 
-1. **A floor has no body.** Only the perspective top face at +48 and the 3px cap at
-   +61; the rest of the cell is open and shows the black backdrop. Only a *wall* fills
-   its whole cell (60px body at +1 plus the cap), which lands exactly on the next row's
-   cell top.
-2. **The floor top face is flat for a continuing run and a wedge at the run's left end.**
-   The wedge is `348` (32x14, sloping up to the right). There is no standalone flat
-   slab resource — it is rows **47..59 of image 237**, whose lower half *is* the floor
-   slab. Drawing the wedge on every cell gives a sawtooth (an easy wrong turn: the wedge
-   template-matches on flat cells too, because it is a subset of the slab).
-3. **Wall-mounted decoration is drawn one cell to the RIGHT of the tile that owns it.**
-   A torch at col 0 puts its bracket at x=32. Confirmed on both torches of room 1 *and*
-   both of room 2, against level data that is otherwise column-exact.
-4. **Palette indices 14 and 15 are stencil markers, not colours.** They are the only
-   saturated entries (a green and a teal) in an otherwise entirely blue-grey palette,
-   and several images — the gate rail in 237, the exit stairs 344, the arch pieces
-   238/240 — carry a mask strip painted in them. Blit them and you get bright green bars
-   across the art. `Framebuffer.Blit` takes a `skipMask`; `DosRenderer.EnvSkipMask`
-   passes 0, 14 and 15 for all background art.
+### Geometry and order
+- `xh = 4*col` (8px units), `x = xh*8 + xl`; `draw_bottom_y = 63*row + 65`,
+  `draw_main_y = bottom - 3`. Every blit is **bottom-anchored**: top = `y - h + 1`.
+  No extra offset is needed. (An earlier "+1 row" calibration was a bad DOSBox crop,
+  see below.)
+- Rows are drawn 2 -> 0, columns 0 -> 9. Each cell runs `floorright, anim_topright,
+  right, anim_right, bottom, loose, base, anim, fore`. After that, the bottom row of the
+  room above is drawn at `main_y=-1` and `bottom_y=2`, which is where the ceiling comes
+  from. A room with nothing above gets a row of floors there.
+- **A tile is drawn in two halves.** Its `base` goes in its own cell, but its
+  `right_id` is drawn by the cell to its **right**, keyed on "what is my left
+  neighbour". This is why the torch bracket, the gate lattice and the posts' flank all
+  sit one cell right of their tile. Column 0 draws the left room's column 9 right half
+  (the sliver on the left edge). A missing neighbour room counts as a wall.
+- Wall bodies (`wall_fram_main`), wall seams/marks, pillar fronts, spike fronts, potion
+  bubbles and a gate the kid is standing under go into the **front** layer and are drawn
+  over the kid.
 
-The room also draws the **left neighbour's last column at x = -7**, which is the wall
-sliver visible in the leftmost 25 pixels.
+### Modifiers (DOS level data)
+The per-tile modifier is **BLUESPEC**. The BLUETYPE top bits don't affect drawing. The
+original rewrites some modifiers when a room loads (LOAD_ALTER_MOD), and the drawer does
+the same:
+- **Walls:** bits 0-1 record which neighbours are walls (SWS=0, SWW=1, WWS=2, WWW=3), and
+  a spec of 1 sets bit 7 ("no blue"). `wall_fram_main[conn]` = 8/10/6/4, so the body is
+  368/370/366/364. 364 is the interior wall, and 368 (a lone wall) is rare.
+- **Gates:** in the level data, a spec of 1 means open and anything else means shut.
+  `DosLevels.NormaliseGates` converts this to the sim's 0..47 height, and the drawer
+  uses `height*4` (0..188).
+- **Floors:** spec 1..3 draws the back-wall decoration `blueline_fram3` (244/245) at
+  `main_y-20` in the cell to the right. These are the "crosses".
+- **Empty tiles:** spec 1..3 draws `blueline_fram1` (324/325/326).
 
-### Masonry: what is rule and what is the original's RNG
-Solved cell by cell against captures of rooms 1, 2 and 3:
-
-* **BLUETYPE modifier 0 always draws body 364** (verified on 40+ cells, no exceptions).
-  A non-zero modifier draws 364, 366 or 370; 368 never turned up. *Which* of the three
-  is the original's own randomness and is not reproduced.
-* **Only the lower two courses carry a vertical seam** (`371` 9px / `372` 8px); the top
-  course never does. The middle course breaks 8..12 px into the cell, the bottom one
-  0..4 px in.
-* Those seams sit on **one continuous grid a shade under 32px apart**, so their offset
-  inside the cell walks down about half a pixel per column and wraps: reading room 3's
-  bottom wall left to right gives 4 4 3 3 2 1 0 0 0. `DosTileArt.SeamX` reproduces the
-  drift; the per-row starting phase is hashed, not derived.
-* The back-wall cross `244` is rare and its placement is unexplained — room 1 has three,
-  room 2 none, with no correlation to modifier or BLUESPEC that fits both.
+### Masonry is seeded, not random
+`wall_pattern` reseeds the original's PRNG on every call with
+`seed = room + row*10 + col`, then advances it once and discards the result.
+`prandom(max)` is Microsoft C's LCG: `seed = seed*214013 + 2531011;
+return (seed>>16) % (max+1)`. The seams (`371/372` = dividers, at `xh+1`+offset for the
+middle course and `xh`+offset for the bottom), the random block `373`, and the marks
+`374-377` all come from it. So the masonry is identical on every visit.
 
 ### Gate
-The portcullis is built, not clipped: threshold `362` @ +7,+52, then the lattice hung
-from the top of the doorway — a short course of the leftover height (`260-h` for h=1..7),
-then 8px courses (`252`), then the weighted end piece (`251`). The drop is
-`GateOpen + 1 - spec`, so a shut gate (spec 0) hangs 48px. Verified byte-exact against
-the shut gate on the left edge of room 1: a 7px course at +1, five full courses, end
-piece at +48.
+The gate is drawn by the cell to its right:
+- `gate_bottom_y = main_y - (height+1)`
+- 8px slices `252` run upward from `gate_bottom_y-12` while above `bottom_y-62`
+- `door_fram_slice[k]` is the partial top course
+- when raised more than 12px, `250` is the bottom piece; otherwise the cell's own art is
+  redrawn and `251` goes over it
 
-Note this only lines up if the sim leaves an untriggered gate at its authored height.
-`Sim/Hazards.TickGates` used to wind *every* gate down towards 0 each tick; it now only
-closes gates that were actually opened.
+`door_fram_slice` shares its first byte with the end of `door_fram_top` in the EXE.
+
+**Level 1 starts with the gate open.** DO_STARTPOS presses the closer in room 5
+(row 0, col 2), so the gate beside room 1 slams shut as the kid drops in. That is why
+every capture shows it shut. `Simulation.StartEvents` does the same, and closer plates
+(tile 6) now close gates instead of opening them.
+
+### Palette indices 14 and 15 are real colours
+They are the teal/green of the exit-door frame, confirmed against the level 3 start
+room. An earlier theory that they were "stencil markers" came from drawing the wrong
+pieces (`237` rows used as a floor slab). Don't mask them.
+
+### Characters
+LOAD_FRAME_TO_OBJ works in a 280-wide space: `obj_x = 2*(x + dx) - 116`, plus 1 when
+`(sbyte)(flags ^ direction) >= 0`, then scaled by 320/280. Facing left, the sprite's
+**left** edge is at `obj_x`. Facing right, its **right** edge is (the width is subtracted
+before scaling). It is not centred. The original's character x is ours + 7
+(`DosRenderer.CharXBias`), and y is the sprite's bottom row (`y - h + 1`).
 
 ### Palette: the VGA DAC replicates, it does not scale
 6-bit DAT colour -> 8-bit is `(v << 2) | (v >> 4)`, **not** `v * 255 / 63`. The old
@@ -225,9 +249,11 @@ dotnet run --project tools/DatDump -- "E:/DOS/games/Prince/VDUNGEON.DAT" out360 
 ```
 Resources 361-377 belong to palette group **360** and come out miscoloured if dumped
 with 200. Sheets are labelled with the image index (= resource id - palette id).
-To place a piece, capture the room in DOSBox, crop the window to native 320x200
-(client area is 640x400: crop `(3,30)`-`(643,430)` of a default-size window, then halve)
-and template-match every dumped PNG against it.
+To check a room, capture it in DOSBox, crop the window to native 320x200 and pixel-diff
+it against `POPGame --room <out.png> <level> <room>`. The client area of a default-size
+window is 640x400 at **`(3,32)`-`(643,432)`**; halve it. The old recipe of `(3,30)` was
+one game row too high: row 0 of the crop is window chrome (243,243,243). If the top row
+of a crop isn't the ceiling colour, the crop is wrong.
 
 ## Level file format (2304 bytes; same for Apple II files and LEVELS.DAT resources)
 | Offset | Size | Section  | Description |
@@ -316,6 +342,9 @@ when **`SDL_VIDEODRIVER=windib`** is set in the environment of whatever launches
 with the default DirectX driver it exits silently with code 0.
 Drive it from PowerShell (`ConvertTo-Json` + `Invoke-RestMethod`); bash heredocs and
 `curl -d` mangle the doubled backslashes the JSON `exePath` needs.
+Launch with `args = 'megahit'` to enable the cheat keys: **Shift+L** skips a level.
+Press Enter to skip the intro first; a Shift+L sent during the intro still counts. Each
+level's start room contains its entrance door, which is handy for checking door art.
 
 ## Common pitfalls
 - X is in 14-per-block units, **not** pixels; only Y is in pixels.

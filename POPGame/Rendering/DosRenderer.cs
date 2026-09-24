@@ -12,8 +12,9 @@ namespace POPGame.Rendering;
 /// horizontal positions scale by 32/14 on the way to DOS pixels while vertical
 /// positions pass through unchanged.
 ///
-/// Background pieces are addressed by raw resource id and placed by
-/// <see cref="DosTileArt"/>; see that file for where the offsets came from.
+/// Background layout comes from <see cref="DosRoomDrawer"/>, a port of the original's
+/// own room-drawing routine; this class only turns its placements into pixels, in
+/// the original order: back layer, characters, front layer.
 /// </summary>
 public sealed class DosRenderer
 {
@@ -25,27 +26,16 @@ public sealed class DosRenderer
     private readonly DosImageBank _kid;
     private readonly DosImageBank _env;
     private readonly DosImageBank _flame;
-
-    /// <summary>How far off the left edge the neighbouring room's last column sits.</summary>
-    private const int SliverInset = 7;
+    private readonly DosRoomDrawer _drawer;
 
     /// <summary>
-    /// Background art is masked: besides index 0, the dungeon bank uses palette entries
-    /// 14 and 15 as stencil markers. They are the only saturated colours in a palette
-    /// that is otherwise all blue-greys, and drawing them paints bright green bars over
-    /// the gate rail and the exit stairs.
+    /// The room drawer works in the original's screen coordinates. Captures of the real
+    /// game put every background piece one row lower than those, consistently, so the
+    /// whole layer is shifted here rather than any one offset being fudged.
     /// </summary>
-    private const int EnvSkipMask = 1 | 1 << 14 | 1 << 15;
+    public const int BackgroundYOffset = 0;
 
     private int _tick;
-
-    /// <summary>Stable per-cell noise, so the same wall is laid the same way every frame.</summary>
-    private static int Hash(int room, int row, int col)
-    {
-        int h = room * 7919 + row * 104729 + col * 1299709;
-        h ^= h >> 13; h *= 0x5bd1e995; h ^= h >> 15;
-        return h & 0x3FFFFFF;
-    }
 
     public Framebuffer Frame { get; } = new(ScreenW, ScreenH);
 
@@ -54,6 +44,7 @@ public sealed class DosRenderer
         _kid = new DosImageBank(DosGame.File("KID.DAT"), 400);
         _env = new DosImageBank(DosGame.File("VDUNGEON.DAT"), 200, 360);
         _flame = new DosImageBank(DosGame.File("PRINCE.DAT"), 150);
+        _drawer = new DosRoomDrawer(DosDrawTables.Load());
     }
 
     /// <summary>World x units -> screen pixels.</summary>
@@ -63,87 +54,46 @@ public sealed class DosRenderer
     {
         _tick++;
         Frame.Clear(0, 0, 0);
-        DrawLayer(sim, sim.Kid.Room, front: false);
-        DrawKid(sim);
-        DrawLayer(sim, sim.Kid.Room, front: true);
-    }
 
-    private void DrawLayer(Simulation sim, int room, bool front)
-    {
-        if (room < 1 || room > Level.NumScreens) return;
-
-        // The room is capped by a floorpiece above row 0, the underside of the
-        // ceiling. Its cell top is one row above the room, so it lands at y = 1.
-        if (!front)
-        {
-            var ceiling = DosTileArt.Ceiling;
-            for (int col = 0; col < Coord.Cols; col++)
-                BlitPiece(ceiling, col * TileW, Coord.BlockTop(-1));
-        }
-
-        // The room to the left shows through in the leftmost 25 pixels: the original
-        // draws that neighbour's last column, clipped, so a wall run reads as
-        // continuing past the edge of the screen instead of stopping dead at x=0.
-        int leftRoom = sim.Level.Left(room);
-
-        for (int row = 0; row < Coord.Rows; row++)
-            for (int col = -1; col < Coord.Cols; col++)
-            {
-                int srcRoom = col < 0 ? leftRoom : room;
-                int srcCol = col < 0 ? Coord.Cols - 1 : col;
-                if (srcRoom < 1 || srcRoom > Level.NumScreens) continue;
-
-                var tile = sim.Level.GetTileId(srcRoom - 1, row, srcCol);
-                var left = srcCol > 0 ? sim.Level.GetTileId(srcRoom - 1, row, srcCol - 1) : TileId.Space;
-
-                // Stable per-cell noise: same room and cell always lay the same bricks.
-                int rnd = Hash(srcRoom, row, srcCol);
-
-                // The brick bond runs across the whole row, so its phase must not vary
-                // cell to cell.
-                int seamPhase = Hash(srcRoom, row, 0) & 3;
-
-                // A gate hangs as far down as its BLUESPEC says; DosTileArt builds the
-                // lattice out of that, so nothing here needs clipping.
-                int spec = tile == TileId.Gate ? sim.Level.GetSpec(srcRoom - 1, row, srcCol) : 0;
-
-                int mod = sim.Level.GetTileModifier(srcRoom - 1, row, srcCol);
-
-                var pieces = front ? DosTileArt.Front(tile) : DosTileArt.Back(tile, left, rnd, spec, mod, srcCol, seamPhase);
-                if (pieces.Count == 0) continue;
-
-                int cellX = col < 0 ? -SliverInset : col * TileW;
-                int cellY = Coord.BlockTop(row);
-
-                // Each torch runs the flame loop from its own phase, so a row of them
-                // does not flicker in lockstep.
-                int phase = srcCol * 3 + row * 5;
-
-                foreach (var piece in pieces)
-                    BlitPiece(piece, cellX, cellY, phase);
-            }
-    }
-
-    private void BlitPiece(DosTileArt.Piece piece, int cellX, int cellY, int phase = 0)
-    {
-        IndexedImage? img;
-        DatPalette pal;
-
-        if (piece.From == DosTileArt.Bank.Flame)
-        {
-            int index = piece.Image + (piece.Frames > 1 ? (_tick + phase) % piece.Frames : 0);
-            img = _flame[index];
-            pal = _flame.PaletteForIndex(index);
-        }
+        var kid = sim.Kid;
+        if (kid.Room >= 1 && kid.Room <= Level.NumScreens)
+            _drawer.Build(sim.Level, kid.Room, kid.Room, kid.Row, kid.BlockX, _tick);
         else
         {
-            img = _env.ById(piece.Image);
-            pal = _env.PaletteForId(piece.Image);
+            _drawer.Back.Clear();
+            _drawer.Fore.Clear();
         }
 
-        if (img is null) return;
-        Frame.Blit(img, pal, cellX + piece.X, cellY + piece.Y, mirror: false,
-                   piece.SrcY, piece.SrcRows, EnvSkipMask);
+        DrawOps(_drawer.Back);
+        DrawKid(sim);
+        DrawOps(_drawer.Fore);
+    }
+
+    private void DrawOps(List<DosRoomDrawer.Op> ops)
+    {
+        foreach (var op in ops)
+        {
+            if (op.Set == DosRoomDrawer.Set.Wipe)
+            {
+                // Mono carries the wipe's height.
+                Frame.FillRect(op.X, op.YBottom - op.Mono + 1 + BackgroundYOffset, op.Width, op.Mono, 0, 0, 0);
+                continue;
+            }
+
+            int id = op.Set switch
+            {
+                DosRoomDrawer.Set.Flame => 150 + op.Id,
+                DosRoomDrawer.Set.Wall => 360 + op.Id,
+                _ => 200 + op.Id,
+            };
+            var bank = op.Set == DosRoomDrawer.Set.Flame ? _flame : _env;
+            var img = bank.ById(id);
+            if (img is null) continue;
+
+            int y = op.YBottom - img.Height + 1 + BackgroundYOffset;
+            Frame.Blit(img, bank.PaletteForId(id), op.X, y, mirror: false,
+                       mode: op.Mode, monoColor: op.Mono);
+        }
     }
 
     /// <summary>
@@ -177,11 +127,29 @@ public sealed class DosRenderer
         var img = _kid[f.Image + 1];        // frame images are 0-based, banks 1-based
         if (img is null) return;
 
-        // dx is in world units and applies in the facing direction; dy is in pixels.
-        int px = ToPx(ch.X + (ch.Face < 0 ? -f.Dx : f.Dx));
-        int py = ch.Y + f.Dy;
+        // LOAD_FRAME_TO_OBJ. The original works in a 280-wide space, obj_x = 2x - 116,
+        // scaled to the screen by 320/280 at the very end. dx applies in the facing
+        // direction; dy is in pixels. Our X sits 7 units left of the original's (the
+        // original takes x-7 when it wants the column), so add that back first.
+        int x = ch.X + CharXBias + (ch.Face < 0 ? -f.Dx : f.Dx);
+        int objX = 2 * x - 116;
 
-        // Sprites are anchored bottom-centre on the character position.
-        Frame.Blit(img, _kid.Palette, px - img.Width / 2, py - img.Height, ch.FacingRight);
+        // A frame whose odd bit disagrees with the facing gets nudged a half unit.
+        if ((sbyte)(f.Flags ^ (ch.Face < 0 ? 0xFF : 0x00)) >= 0) objX++;
+
+        // The sprite's LEFT edge is at obj_x when facing left, and its RIGHT edge when
+        // it is mirrored to face right — not centred on the character.
+        if (ch.FacingRight) objX -= img.Width;
+        int px = objX * ScreenW / 280;
+
+        // Like every blit in the original, y names the image's bottom row.
+        int py = ch.Y + f.Dy;
+        Frame.Blit(img, _kid.Palette, px, py - img.Height + 1, ch.FacingRight);
     }
+
+    /// <summary>
+    /// How far the original's character x is to the right of ours. Its start position is
+    /// <c>x_bump[col+5] + 14</c> (72 for column 0) where ours is the block centre (65).
+    /// </summary>
+    private const int CharXBias = 7;
 }

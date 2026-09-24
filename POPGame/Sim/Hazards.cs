@@ -49,9 +49,13 @@ public sealed class Hazards
         switch (tile)
         {
             case TileId.PressPlate:
+                // Tile 6 is a CLOSER: it slams its gates shut rather than raising them.
+                PushPlate(_level.GetSpec(s0, kid.Row, col), close: true);
+                break;
+
             case TileId.UPressPlate:
             case TileId.DPressPlate:
-                PushPlate(_level.GetSpec(s0, kid.Row, col));
+                PushPlate(_level.GetSpec(s0, kid.Row, col), close: false);
                 break;
 
             case TileId.Loose:
@@ -69,7 +73,7 @@ public sealed class Hazards
     /// PUSHPP (MOVER.S:425): hold the plate down for pptimer ticks, and trigger
     /// everything on its link chain. A timer of 31 means permanently held.
     /// </summary>
-    private void PushPlate(int linkIndex)
+    private void PushPlate(int linkIndex, bool close)
     {
         if (linkIndex is < 0 or > 255) return;
 
@@ -77,7 +81,7 @@ public sealed class Hazards
             _links.SetTimer(linkIndex, Constants.PPTimer);
 
         foreach (var t in _links.Chain(linkIndex))
-            Trigger(t.Screen, t.Cell);
+            Trigger(t.Screen, t.Cell, close);
 
         _activePlates.Add(linkIndex);
     }
@@ -85,7 +89,19 @@ public sealed class Hazards
     private readonly HashSet<int> _activePlates = [];
     private bool _exitOpen;
 
-    private void Trigger(int screen, int cell)
+    /// <summary>
+    /// Presses the button at a cell as if the kid had stepped on it. Level 1 uses this
+    /// at the start: the original presses the closer in room 5 as the kid drops in, so
+    /// the gate by the first room — authored open — slams shut (DO_STARTPOS).
+    /// </summary>
+    public void PressButton(int room, int row, int col)
+    {
+        var tile = _level.GetTileId(room - 1, row, col);
+        if (tile is not (TileId.PressPlate or TileId.UPressPlate or TileId.DPressPlate)) return;
+        PushPlate(_level.GetSpec(room - 1, row, col), close: tile == TileId.PressPlate);
+    }
+
+    private void Trigger(int screen, int cell, bool close)
     {
         if (screen < 1 || screen > Level.NumScreens) return;
         if (cell is < 0 or >= Level.CellsPerScreen) return;
@@ -96,8 +112,18 @@ public sealed class Hazards
         switch (_level.GetTileId(s0, row, col))
         {
             case TileId.Gate:
-                // A triggered gate is driven open and held while its plate is down.
-                _gateHold[(screen, cell)] = Constants.GateTimer;
+                if (close)
+                {
+                    _gateHold.Remove((screen, cell));
+                    _gateClosing.Remove((screen, cell));
+                    _gateSlamming.Add((screen, cell));
+                }
+                else
+                {
+                    // A triggered gate is driven open and held while its plate is down.
+                    _gateSlamming.Remove((screen, cell));
+                    _gateHold[(screen, cell)] = Constants.GateTimer;
+                }
                 break;
 
             case TileId.Exit:
@@ -118,6 +144,12 @@ public sealed class Hazards
     /// </summary>
     private readonly HashSet<(int Screen, int Cell)> _gateClosing = [];
 
+    /// <summary>Gates a closer has been pressed for: they drop fast, all the way.</summary>
+    private readonly HashSet<(int Screen, int Cell)> _gateSlamming = [];
+
+    /// <summary>How far a slammed gate drops per tick, in gate-height units.</summary>
+    private const int GateSlamStep = 10;
+
     private void TickGates()
     {
         var done = new List<(int, int)>();
@@ -135,6 +167,16 @@ public sealed class Hazards
         }
 
         foreach (var key in done) { _gateHold.Remove(key); _gateClosing.Add(key); }
+
+        foreach (var key in _gateSlamming.ToList())
+        {
+            var (screen, cell) = key;
+            int s0 = screen - 1, row = cell / Coord.Cols, col = cell % Coord.Cols;
+
+            int spec = _level.GetSpec(s0, row, col);
+            if (spec > 0) _level.SetSpec(s0, row, col, (byte)Math.Max(0, spec - GateSlamStep));
+            else _gateSlamming.Remove(key);
+        }
 
         // A gate whose hold has run out drops shut again.
         foreach (var key in _gateClosing.ToList())

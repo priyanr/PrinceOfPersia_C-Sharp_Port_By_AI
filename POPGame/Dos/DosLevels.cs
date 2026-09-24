@@ -23,6 +23,24 @@ public sealed class DosLevels
     public Level Get(int level)
     {
         var res = _dat.Resource(FirstId + level);
-        return Level.Load(res[..2304].ToArray());
+        var lv = Level.Load(res[..2304].ToArray());
+        NormaliseGates(lv);
+        return lv;
+    }
+
+    /// <summary>
+    /// In the DOS data a gate's BLUESPEC is a flag, not a height: 1 means it starts
+    /// open and anything else means shut (LOAD_ALTER_MOD turns 1 into the fully raised
+    /// 188 and the rest into 0). The simulation keeps gate height as 0..GateOpen, so
+    /// convert once here, in the pristine copy too so a level restart stays right.
+    /// </summary>
+    private static void NormaliseGates(Level lv)
+    {
+        for (int i = 0; i < lv.BlueType.Length; i++)
+        {
+            if ((TileId)(lv.BlueType[i] & 0x1F) != TileId.Gate) continue;
+            lv.BlueSpec[i] = (byte)(lv.BlueSpec[i] == 1 ? Sim.RoomView.GateOpen : 0);
+            lv.LiveBlueSpec[i] = lv.BlueSpec[i];
+        }
     }
 }
