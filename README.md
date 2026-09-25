@@ -11,6 +11,8 @@ real DOS game running in DOSBox. The git history keeps one commit per stage, and
 [`SESSION_HISTORY.md`](SESSION_HISTORY.md) records every session: the model, my prompts
 word for word, and what changed.
 
+You can read about it in my blog https://blog.priyan.in/2026/09/analyzing-frontier-model-progress-with.html
+
 > **No game data is included.** This repository contains only source code. To run it you
 > need your own copy of the original DOS Prince of Persia; the program reads the
 > animation tables, levels and artwork from those files at runtime.
