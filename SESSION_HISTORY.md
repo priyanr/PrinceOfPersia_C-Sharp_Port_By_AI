@@ -10,7 +10,7 @@ stretch of work. Edits made through shell scripts are listed where the log shows
 | # | Date (UTC) | Session id | Model | Claude Code | Outcome |
 |---|------------|------------|-------|-------------|---------|
 | 0a | 2026-02-27 → 02-28 | 8 sessions (`16ec95f5` … `29e7fe87`) | Opus 4.x, probably `claude-opus-4-6` (see below) | unknown | Apple II-based console → Raylib prototype + LevelEditor |
-| 0b | 2026-03-14 | Codex chat (not Claude) | Codex "5.6 terra" (as you recall it) | Codex | pixel-art filtering, sprite transparency, gate/pillar collision; `AGENTS.md` |
+| 0b | 2026-03-14 | Codex chat (not Claude) | most likely GPT-5.4 (not recorded) | Codex | pixel-art filtering, sprite transparency, gate/pillar collision; `AGENTS.md` |
 | 1 | 2026-09-01 17:32 | `b0a2e64c` | — | 2.1.252 | `/model` only, no work |
 | 2 | 2026-09-01 17:32 → 09-02 02:32 | `cc346989` | `claude-opus-5` | 2.1.252 | DOS data extraction, new frame-sequence engine, first DOS rendering |
 | 3 | 2026-09-02 03:54 → 06:46 | `e2e6d903` | `claude-opus-5` | 2.1.252 | Tile art matched against DOSBox, ledge/climb/barrier fixes |
@@ -82,10 +82,16 @@ console `POPGame`.
 
 → The first `CLAUDE.md` (dated 2026-03-01 01:55 in the backup).
 
-### 0b — 2026-03-14 · OpenAI Codex ("Codex 5.6 terra")
-After the first Claude version, you tried OpenAI Codex. You recall the model as
-"Codex 5.6 terra"; Codex keeps no local record here, so that name is from memory. The chat
-below is transcribed from what you pasted. `history.jsonl` has no Claude prompts for this
+### 0b — 2026-03-14 · OpenAI Codex (most likely GPT-5.4)
+After the first Claude version, you tried OpenAI Codex. Codex keeps no local record here,
+so the exact model is unknown.
+- It was first recalled as "GPT 5.6 terra", but that can't be right: GPT-5.6 (Sol, Terra,
+  Luna) only entered limited preview on 2026-06-26 and was released on 2026-07-09.
+- The session date is certain (the file timestamps match the chat). GPT-5.4 was released
+  for Codex on 2026-03-05, nine days before, which fits "when the new Codex came out".
+- GPT-5.3-Codex, the model before it, is also possible.
+
+The chat below is transcribed from what you pasted. `history.jsonl` has no Claude prompts for this
 project that day, and the file dates in the backup match this chat exactly. `AGENTS.md`
 (dated 2026-03-14) is Codex's instruction file, a copy of the Claude-written
 `CLAUDE.md` of the time.

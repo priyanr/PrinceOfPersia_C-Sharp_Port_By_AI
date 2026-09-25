@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-25 — Correction: the Codex model was not GPT-5.6
+
+The March 2026 Codex session was recorded as "GPT 5.6 terra". GPT-5.6 was only released
+on 2026-07-09 (limited preview from 2026-06-26). The most likely model is GPT-5.4,
+released for Codex on 2026-03-05; the exact model was not recorded.
+`SESSION_HISTORY.md` and the Codex commit message now say so. The commit message was
+reworded by rewriting history, so the published history was replaced (force push).
+
 ## 2026-09-25 — Prepared for publishing: GPL-3.0, README, notices
 
 - **License: GPL-3.0-or-later** (`LICENSE`, the official text from gnu.org).
