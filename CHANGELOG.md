@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-09-25 — Kid sprite anchoring reverted; line endings restored
+
+Compared against the backup taken before the 2026-09-24 session
+(`D:\temp\popsepbeforeop5`), with identical input scripts run through both builds:
+
+- **Movement is unchanged.** 8 scripts, 713 ticks: route, running jump, jump-up, careful
+  steps, crouch, walking left, and level 2. Room, x, y, row, frame, action and sequence
+  are identical on every tick.
+- **The regression was drawing only.** The 2026-09-24 kid anchoring (front edge + `x+7`)
+  matched the original facing left but pushed the kid ~7px into walls facing right,
+  where the wall's front layer hid him. Horizontal placement is back to centred on the
+  sim's x. The verified vertical fix (`y - h + 1`) stays. See CLAUDE.md "Characters" for
+  what has to be ported before the original's anchoring can be used.
+- **Line endings:** the 2026-09-24 edits had converted `Sim/Hazards.cs`,
+  `Sim/Simulation.cs` and `Dos/DosLevels.cs` from LF to CRLF. They are LF again.
+- Recovered the Feb 2026 history into `SESSION_HISTORY.md` from `~/.claude/history.jsonl`
+  and the backup at `D:\temp\popjuly\POPCS`. That backup still holds the original
+  `POPCS/` console project, which is missing from this tree.
+
 ## 2026-09-24 — Rooms drawn by the original's own routine
 
 The room renderer was rewritten. Tile placement is no longer tuned by hand from screenshots. It is now a

@@ -127,29 +127,20 @@ public sealed class DosRenderer
         var img = _kid[f.Image + 1];        // frame images are 0-based, banks 1-based
         if (img is null) return;
 
-        // LOAD_FRAME_TO_OBJ. The original works in a 280-wide space, obj_x = 2x - 116,
-        // scaled to the screen by 320/280 at the very end. dx applies in the facing
-        // direction; dy is in pixels. Our X sits 7 units left of the original's (the
-        // original takes x-7 when it wants the column), so add that back first.
-        int x = ch.X + CharXBias + (ch.Face < 0 ? -f.Dx : f.Dx);
-        int objX = 2 * x - 116;
-
-        // A frame whose odd bit disagrees with the facing gets nudged a half unit.
-        if ((sbyte)(f.Flags ^ (ch.Face < 0 ? 0xFF : 0x00)) >= 0) objX++;
-
-        // The sprite's LEFT edge is at obj_x when facing left, and its RIGHT edge when
-        // it is mirrored to face right — not centred on the character.
-        if (ch.FacingRight) objX -= img.Width;
-        int px = objX * ScreenW / 280;
-
-        // Like every blit in the original, y names the image's bottom row.
+        // dx is in world units and applies in the facing direction; dy is in pixels.
+        int px = ToPx(ch.X + (ch.Face < 0 ? -f.Dx : f.Dx));
         int py = ch.Y + f.Dy;
-        Frame.Blit(img, _kid.Palette, px, py - img.Height + 1, ch.FacingRight);
-    }
 
-    /// <summary>
-    /// How far the original's character x is to the right of ours. Its start position is
-    /// <c>x_bump[col+5] + 14</c> (72 for column 0) where ours is the block centre (65).
-    /// </summary>
-    private const int CharXBias = 7;
+        // Horizontally the sprite is centred on the character. The original anchors it
+        // by its front edge (LOAD_FRAME_TO_OBJ: obj_x = 2x - 116, scaled 320/280, left
+        // edge when facing left, right edge when facing right), but that only lines up
+        // once the simulation's x means the same point on the kid as the original's —
+        // a constant offset matched the original facing left and sank him into walls
+        // facing right. Until the sim's x convention is ported, centring is the
+        // placement that agrees with our own collision.
+        //
+        // Vertically, like every blit in the original, y names the image's bottom row
+        // (checked against a DOSBox capture).
+        Frame.Blit(img, _kid.Palette, px - img.Width / 2, py - img.Height + 1, ch.FacingRight);
+    }
 }

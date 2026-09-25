@@ -231,11 +231,23 @@ room. An earlier theory that they were "stencil markers" came from drawing the w
 pieces (`237` rows used as a floor slab). Don't mask them.
 
 ### Characters
-LOAD_FRAME_TO_OBJ works in a 280-wide space: `obj_x = 2*(x + dx) - 116`, plus 1 when
-`(sbyte)(flags ^ direction) >= 0`, then scaled by 320/280. Facing left, the sprite's
-**left** edge is at `obj_x`. Facing right, its **right** edge is (the width is subtracted
-before scaling). It is not centred. The original's character x is ours + 7
-(`DosRenderer.CharXBias`), and y is the sprite's bottom row (`y - h + 1`).
+The kid sprite is currently drawn **centred on the sim's x**, with y as the sprite's
+bottom row (`y - h + 1`, checked against DOSBox).
+
+The original anchors differently. LOAD_FRAME_TO_OBJ works in a 280-wide space:
+`obj_x = 2*(x + dx) - 116`, plus 1 when `(sbyte)(flags ^ direction) >= 0`, then scaled by
+320/280. Facing left, the sprite's **left** edge is at `obj_x`; facing right, its
+**right** edge is. **Don't switch to this until the sim's x convention is ported too.**
+Our x is not the original's x plus a constant. Trying `+7` (2026-09-24) matched the
+original facing left but sank the kid ~7px into walls facing right, so it was reverted
+on 2026-09-25.
+
+Two things to port first:
+- how COLL.S/CTRLSUBS position the kid against walls
+- DO_STARTPOS's entry, which starts the kid facing the opposite way and plays the turn
+  sequence; level 1 plays the fall instead
+
+Then verify against DOSBox in **both** facing directions.
 
 ### Palette: the VGA DAC replicates, it does not scale
 6-bit DAT colour -> 8-bit is `(v << 2) | (v >> 4)`, **not** `v * 255 / 63`. The old
