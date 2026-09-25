@@ -2,7 +2,9 @@
 
 ## Project Overview
 A C# .NET 10 remake of Prince of Persia that runs off the **original DOS install**
-rather than hand-transcribed data. Nothing copyrighted lives in this repo.
+rather than hand-transcribed data. No game data (executables, levels, artwork) lives in
+this repo. The code is GPL-3.0-or-later because `DosRoomDrawer.cs` ports SDLPoP
+(see README.md).
 
 - **POPGame** (`POPGame/`) — the game (Raylib window, or headless PNG dump)
 - **LevelEditor** (`LevelEditor/`) — read-only level viewer (legacy, Apple II data)

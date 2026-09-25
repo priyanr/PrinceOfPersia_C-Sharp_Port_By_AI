@@ -3,7 +3,7 @@ namespace POPGame.Dos;
 /// <summary>
 /// Locates the original DOS Prince of Persia installation, which supplies all
 /// authentic assets: PRINCE.EXE (frame + sequence tables), LEVELS.DAT and the
-/// graphics DATs. Nothing copyrighted is copied into this repository.
+/// graphics DATs. No game data is copied into this repository.
 ///
 /// Search order: POP_DOS_DIR environment variable, then a few well-known paths.
 /// </summary>

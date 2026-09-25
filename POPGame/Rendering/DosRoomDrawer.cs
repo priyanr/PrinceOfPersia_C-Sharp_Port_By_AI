@@ -1,3 +1,13 @@
+// This file is a C# port of the room-drawing code of SDLPoP (src/seg008.c),
+// https://github.com/NagyD/SDLPoP — "SDLPoP, a port/conversion of the DOS game
+// Prince of Persia. Copyright (C) 2013-2025 Dávid Nagy", licensed under the GNU
+// General Public License, version 3 or (at your option) any later version.
+//
+// Modified 2026: translated to C#, restructured to emit placement lists for a
+// framebuffer renderer, and driven by tables read from the player's PRINCE.EXE.
+// This file, like the rest of POPCS, is distributed under the GNU GPL v3 or later;
+// see LICENSE.
+
 using POPGame.Data;
 using POPGame.Dos;
 using POPGame.Sim;

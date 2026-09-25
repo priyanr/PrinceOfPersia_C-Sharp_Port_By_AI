@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-09-25 — Prepared for publishing: GPL-3.0, README, notices
+
+- **License: GPL-3.0-or-later** (`LICENSE`, the official text from gnu.org).
+  `Rendering/DosRoomDrawer.cs` is a C# port of SDLPoP's room-drawing code, which is
+  GPL-3.0-or-later, so the project takes the same license. That file now carries a notice
+  saying where it comes from and what was changed.
+- **`README.md`:** what the project is, its status, requirements ("bring your own DOS
+  copy"), how to run it, credits (Jordan Mechner, SDLPoP / David Nagy, Fabien Sanglard),
+  and a non-affiliation disclaimer (Prince of Persia is a Ubisoft trademark).
+- **Wording:** "nothing copyrighted lives in this repo" was inaccurate, since code under the
+  GPL is still copyrighted. CLAUDE.md and `DosGame.cs` now say no *game data* is included.
+- **History rewritten before publishing:** every commit now uses a GitHub no-reply email,
+  and a local user path in `SESSION_HISTORY.md` became `~`.
+
 ## 2026-09-25 — Kid sprite anchoring reverted; line endings restored
 
 Compared against the backup taken before the 2026-09-24 session
