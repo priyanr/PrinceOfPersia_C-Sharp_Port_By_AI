@@ -304,6 +304,38 @@ game state.
 
 ---
 
+## Session 5 — cloud session (2026-09-30)
+
+**Prompt**
+1. > this is cloid session we donot have dosbox can you fix the next oending issues without it
+
+**Setup:** no .NET SDK in the container (installed `dotnet-sdk-10.0` from Ubuntu's
+archive; the dot.net installer host was blocked), no DOS install and no DOSBox. SDLPoP
+was cloned as the reference. Everything was checked by building and by reading it
+against SDLPoP, not by running it.
+
+**Changes** (details in `CHANGELOG.md`, 2026-09-30 later)
+- `Sim/KidEngine.cs`, `KidEngine.Physics.cs`: check_spiked, spiked, is_spike_harmful,
+  land's spike branch, check_chomped_kid, chomped, the mirror branch of is_obstacle,
+  start_chompers calls from start_fall and land.
+- `Sim/Hazards.cs`: start_chompers, start_anim_chomper, animate_chomper, `DrawnRoom`.
+- `Sim/SeqRunner.cs`: `RowChanged` hook (play_seq's up/down call start_chompers).
+- `Sim/Simulation.cs`: check_the_end (chompers on room change), the Kid.alive death
+  counter, `CanRestart` / `ShowPressButton`, `KidClip`.
+- `Sim/KidEngine.Clip.cs` (new): clip_char.
+- `Rendering/DosRoomDrawer.cs`: palace branches, gen_palace_wall_colors, palace
+  wall_pattern, layered wipes, leveldoor_ybottom / leveldoor_right.
+- `Rendering/DosRenderer.cs`: VDUNGEON / VPALACE by level type, wipe layers and
+  colours, mono blits in the global VGA palette, clipped kid.
+- `Rendering/Framebuffer.cs`: `Blit` takes a clip rectangle.
+- `Dos/DosLevels.cs`: `LevelType` (tbl_level_type), shared with `Hazards`.
+- `Engine/DosGameLoop.cs`: wait for Shift/Enter after death; "Press Button to Continue".
+- Docs: CHANGELOG, PENDING ("Verify" list), this file.
+
+**Not verified.** See PENDING.md "Verify".
+
+---
+
 ## Not in this history
 - The `dosbox-control` and `control-exe` skills were built in their own projects
   (`F:\priyan\Projects\AI\tools\claude\...`), which have separate session logs.

@@ -58,10 +58,16 @@ public sealed class Framebuffer
     /// How the original's blitter combines the image with the screen; see <see cref="BlitMode"/>.
     /// </param>
     /// <param name="monoColor">Palette index every set pixel takes in <see cref="BlitMode.Mono"/>.</param>
+    /// <param name="clip">Only pixels inside this rectangle are drawn (set_clip_rect); null = everywhere.</param>
     public void Blit(IndexedImage img, DatPalette pal, int x, int y, bool mirror,
                      int srcY = 0, int srcRows = -1, int skipMask = 1,
-                     BlitMode mode = BlitMode.Trans, int monoColor = 0)
+                     BlitMode mode = BlitMode.Trans, int monoColor = 0,
+                     (int Left, int Top, int Right, int Bottom)? clip = null)
     {
+        var (cl, ct, cr, cb) = clip ?? (0, 0, Width, Height);
+        cl = Math.Max(cl, 0); ct = Math.Max(ct, 0);
+        cr = Math.Min(cr, Width); cb = Math.Min(cb, Height);
+
         // An opaque blit draws index 0 as a colour; the stencil markers stay masked.
         if (mode == BlitMode.NoTrans) skipMask &= ~1;
 
@@ -70,7 +76,7 @@ public sealed class Framebuffer
         for (int sy = Math.Max(0, srcY); sy < last; sy++)
         {
             int dy = y + sy - srcY;
-            if (dy < 0 || dy >= Height) continue;
+            if (dy < ct || dy >= cb) continue;
 
             int rowIn = sy * img.Width;
             for (int sx = 0; sx < img.Width; sx++)
@@ -79,7 +85,7 @@ public sealed class Framebuffer
                 if ((skipMask >> idx & 1) != 0) continue;
 
                 int dx = x + sx;
-                if (dx < 0 || dx >= Width) continue;
+                if (dx < cl || dx >= cr) continue;
 
                 int o = (dy * Width + dx) * 4;
                 if (mode == BlitMode.Black) { Pixels[o] = Pixels[o + 1] = Pixels[o + 2] = 0; Pixels[o + 3] = 255; continue; }

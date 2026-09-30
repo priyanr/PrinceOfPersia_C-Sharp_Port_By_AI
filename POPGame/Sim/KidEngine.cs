@@ -49,6 +49,13 @@ public sealed partial class KidEngine
     /// <summary>The room the level started in; its exit door can't be used (up_pressed).</summary>
     public int StartRoom { get; set; }
 
+    /// <summary>
+    /// jumped_through_mirror: set by is_obstacle when a running jump goes through the
+    /// level 4 mirror. The original then releases the kid's shadow (jump_through_mirror,
+    /// seg003); there are no other characters yet, so nothing reads it.
+    /// </summary>
+    public bool JumpedThroughMirror { get; set; }
+
     // ── per-frame order ───────────────────────────────────────────────────────
 
     /// <summary>
@@ -81,12 +88,14 @@ public sealed partial class KidEngine
         CheckAction();
         _hazards.CheckPress(ch, _frame);
         CheckSpikeBelow();
+        CheckSpiked();
+        CheckChompedKid();
         _hazards.CheckKnock(ch, fx.JarFloor);
     }
 
     /// <summary>
     /// check_spike_below (seg006): spikes under the kid's feet, or anywhere below him
-    /// down an open drop in this room, spring out. (Being spiked is not ported yet.)
+    /// down an open drop in this room, spring out.
     /// </summary>
     private void CheckSpikeBelow()
     {
@@ -111,6 +120,83 @@ public sealed partial class KidEngine
                 }
             } while (notFinished);
         }
+    }
+
+    /// <summary>
+    /// check_spiked (seg006): running (frames 7..14) or starting a running jump (34..39)
+    /// onto spikes that are springing out, or landing a jump (26, 43) on any spikes
+    /// that are out, impales the kid.
+    /// </summary>
+    private void CheckSpiked()
+    {
+        int frame = _ch.Frame;
+        if (GetTile(_ch.Room, _ch.Col, _ch.Row) != TileId.Spikes) return;
+        int harmful = IsSpikeHarmful();
+        if ((harmful >= 2 && (frame is >= 7 and < 15 || frame is >= 34 and < 40))
+            || (frame is 43 or 26 && harmful != 0))
+        {
+            Spiked();
+        }
+    }
+
+    /// <summary>
+    /// is_spike_harmful (seg007), for the spikes of the last get_tile: 0 retracted or
+    /// disabled, 2 springing out (1..4), 1 out and holding (bit 7).
+    /// </summary>
+    private int IsSpikeHarmful()
+    {
+        sbyte modifier = (sbyte)Modif();
+        if (modifier is 0 or -1) return 0;
+        if (modifier < 0) return 1;
+        if (modifier < 5) return 2;
+        return 0;
+    }
+
+    /// <summary>
+    /// spiked (seg005): impaled on the spikes of the last get_tile, which stay out for
+    /// good (0xFF) and harmless to anyone else.
+    /// </summary>
+    private void Spiked()
+    {
+        SetModif(0xFF);
+        _ch.Y = Coord.FloorY(_ch.Row);
+        _ch.X = Coord.BlockEdge(_tileCol) + 10;
+        _ch.X = _ch.DxForward(8);
+        _ch.FallY = 0;
+        TakeHp(100);
+        _seq.Start(_ch, Seq.Impale);
+        PlaySeq();
+    }
+
+    /// <summary>
+    /// check_chomped_kid (seg004): a shut chomper (frame 2) in a column the kid's body
+    /// overlaps on his row cuts him in half.
+    /// </summary>
+    private void CheckChompedKid()
+    {
+        int tileRow = _ch.Row;
+        for (int tileCol = 0; tileCol < 10; ++tileCol)
+        {
+            if (_currRowCollFlags[tileCol] == 0xFF
+                && GetTile(_currRowCollRoom[tileCol], tileCol, tileRow) == TileId.Slicer
+                && (Modif() & 0x7F) == 2)
+            {
+                Chomped();
+            }
+        }
+    }
+
+    /// <summary>chomped (seg004): blood on the jaws, and the kid is halved.</summary>
+    private void Chomped()
+    {
+        SetModif(Modif() | 0x80);
+        if (_ch.Frame == 178 || _ch.Room != _currRoom) return;
+        _ch.X = Coord.BlockEdge(_tileCol) + 7;
+        _ch.X = _ch.DxForward(_ch.FacingRight ? 6 : 7);   // 7 - !Char.direction
+        _ch.Y = Coord.FloorY(_ch.Row);
+        TakeHp(100);
+        _seq.Start(_ch, Seq.Halve);
+        PlaySeq();
     }
 
     /// <summary>exit_room (seg002): move the kid to the next room once he leaves this one.</summary>
@@ -296,6 +382,13 @@ public sealed partial class KidEngine
 
     /// <summary>curr_room_modif[curr_tilepos]: BLUESPEC of the last tile read.</summary>
     private int Modif() => _posRoom > 0 ? _level.GetSpec(_posRoom - 1, _posRow, _posCol) : 0;
+
+    /// <summary>curr_room_modif[curr_tilepos] = value, for the last tile read.</summary>
+    private void SetModif(int value)
+    {
+        if (_posRoom <= 0) return;
+        _level.LiveBlueSpec[(_posRoom - 1) * Level.CellsPerScreen + _posRow * Coord.Cols + _posCol] = (byte)value;
+    }
 
     private TileId GetTileAtChar() => GetTile(_ch.Room, _ch.Col, _ch.Row);
     private TileId GetTileAboveChar() => GetTile(_ch.Room, _ch.Col, _ch.Row - 1);

@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-09-30 (later) — Spikes, chompers, palace graphics, sprite clipping, death wait
+
+Ported in a cloud session with no DOS install and no DOSBox, so **nothing here has been
+compared against the original yet**. Each routine is a line-by-line port of the SDLPoP
+routine it names, and the build is clean. The checks to do are listed under "Verify" in
+PENDING.md.
+
+- **Spikes impale** (check_spiked / spiked, seg006/seg005): running or starting a
+  running jump onto springing spikes, or landing a jump on any that are out. Landing on
+  them from a fall does too (land's spike branch, including the original's jump into the
+  alive branch). The spikes that got someone stay out for good (0xFF).
+- **Chompers** chomp (start_chompers / animate_chomper, seg007). They start when the
+  kid enters their room or row, lands, or starts a fall, each a few frames behind the
+  last. A shut chomper (frame 2) in a column the kid overlaps halves him and gets blood
+  on it (check_chomped_kid / chomped, seg004).
+- **Mirror**: a running jump from right to left goes through it (is_obstacle's mirror
+  branch). The shadow it releases is not ported (no other characters yet).
+- **Palace levels (4-6, 10, 11, 14)** load VPALACE.DAT (load_lev_spr, by
+  tbl_level_type, now `DosLevels.LevelType`) and use the room drawer's palace branches:
+  solid-colour bricks per room (gen_palace_wall_colors) with divider decals, wall
+  stripes, doortop arches, palace potions, the wider level-door wipe, no dungeon wall
+  bodies. The level 4 mirror was drawn with dungeon art, which is probably why it looked
+  black.
+- **Wipes are layered as in draw_tables**: layer 0 before the back table, layer 1 after
+  the characters. The start room's level-door wipe moved from inside the back list to
+  layer 0.
+- **Mono blits use the global VGA palette** (method_3_blit_mono paints `palette[color]`),
+  not the image's own palette: chomper blood, potion bubbles, palace wall seams.
+- **Sprite clipping** (clip_char, seg006): walls and doortops to the kid's right, the
+  floor above when he climbs or jumps up, and the exit door when he climbs the stairs
+  now cut his sprite off. The play area also clips at y 192 (reset_obj_clip). It runs at
+  draw time on a copy of the kid, as add_kid_to_objtable does, and doesn't change the
+  simulation.
+- **Dying**: the level no longer restarts at once. The death plays out, and after the
+  death frame has shown for 7 ticks (Kid.alive > 6; the original also waits for the
+  death music) Shift or Enter restarts. "Press Button to Continue" is shown, except on
+  level 0 and level 15. R still restarts at any time.
+
 ## 2026-09-30 — Animated tiles and falling floors ported (seg007); sword, potions, big pillars
 
 `Sim/Hazards.cs` was a hand-written approximation (its own gate speeds, loose-floor timer

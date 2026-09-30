@@ -6,7 +6,8 @@ namespace POPGame.Rendering;
 
 /// <summary>
 /// Draws a room at the DOS native 320x200 into a <see cref="Framebuffer"/>, using
-/// the graphics out of VDUNGEON.DAT, PRINCE.DAT and KID.DAT.
+/// the graphics out of VDUNGEON.DAT or VPALACE.DAT (by the level's type), PRINCE.DAT
+/// and KID.DAT.
 ///
 /// The world uses the original units (14 x-units per block, 63 pixels per row), so
 /// horizontal positions scale by 32/14 on the way to DOS pixels while vertical
@@ -24,7 +25,9 @@ public sealed class DosRenderer
     public const int TileH = Coord.BlockHeight;   // 63
 
     private readonly DosImageBank _kid;
-    private readonly DosImageBank _env;
+    private DosImageBank _env;
+    private int _envType;
+    private readonly DosImageBank?[] _envBanks = new DosImageBank?[2];
     private readonly DosImageBank _flame;
     private readonly DosRoomDrawer _drawer;
     private readonly DosDrawTables _tables;
@@ -43,10 +46,21 @@ public sealed class DosRenderer
     public DosRenderer()
     {
         _kid = new DosImageBank(DosGame.File("KID.DAT"), 400);
-        _env = new DosImageBank(DosGame.File("VDUNGEON.DAT"), 200, 360);
+        _env = EnvBank(0);
         _flame = new DosImageBank(DosGame.File("PRINCE.DAT"), 150);
         _tables = DosDrawTables.Load();
         _drawer = new DosRoomDrawer(_tables);
+    }
+
+    /// <summary>
+    /// load_lev_spr (seg000): the environment (chtab 6, resource 200) and wall (chtab 7,
+    /// resource 360) images come from V + DUNGEON/PALACE + .DAT, by tbl_level_type.
+    /// </summary>
+    private DosImageBank EnvBank(int levelType)
+    {
+        levelType = levelType != 0 ? 1 : 0;
+        return _envBanks[levelType] ??= new DosImageBank(
+            DosGame.File(levelType == 0 ? "VDUNGEON.DAT" : "VPALACE.DAT"), 200, 360);
     }
 
     /// <summary>World x units -> screen pixels.</summary>
@@ -57,17 +71,25 @@ public sealed class DosRenderer
         _tick++;
         Frame.Clear(0, 0, 0);
 
+        _envType = DosLevels.LevelType(sim.LevelNumber);
+        _env = EnvBank(_envType);
+
         var kid = sim.Kid;
         if (kid.Room >= 1 && kid.Room <= Level.NumScreens)
-            _drawer.Build(sim.Level, kid.Room, kid.Room, kid.Row, kid.Col, _tick);
+            _drawer.Build(sim.Level, kid.Room, kid.Room, kid.Row, kid.Col, _tick, _envType);
         else
         {
             _drawer.Back.Clear();
             _drawer.Fore.Clear();
+            _drawer.WipesBack.Clear();
+            _drawer.WipesFore.Clear();
         }
 
+        // draw_tables: wipes 0, back table, characters, wipes 1, front table.
+        DrawOps(_drawer.WipesBack);
         DrawOps(_drawer.Back);
         DrawMid(sim);
+        DrawOps(_drawer.WipesFore);
         DrawOps(_drawer.Fore);
 
         if (sim.Flash != 0) Flash(sim.Flash);
@@ -139,13 +161,28 @@ public sealed class DosRenderer
         DrawOps(ops);
     }
 
-    // The VGA colours a pickup flashes the background with (flash_color).
+    // VGA colours 0..15 (custom->vga_palette, set at start-up): what a pickup flashes
+    // the background with (flash_color), and what the mono blitter paints with.
     private static readonly (byte R, byte G, byte B)[] FlashColors =
     [
         (0, 0, 0), (0, 0, 170), (0, 170, 0), (0, 170, 170), (170, 0, 0), (170, 0, 170),
         (170, 85, 0), (170, 170, 170), (85, 85, 85), (85, 85, 255), (85, 255, 85),
         (85, 255, 255), (255, 85, 85), (255, 85, 255), (255, 255, 85), (255, 255, 255),
     ];
+
+    /// <summary>
+    /// method_3_blit_mono (seg009) paints with <c>palette[color]</c>, the global VGA
+    /// palette, not the image's own colours: chomper blood (12), potion bubbles
+    /// (9, 10, 12), the palace wall seams (6).
+    /// </summary>
+    private static readonly DatPalette VgaBase = MakeVgaBase();
+
+    private static DatPalette MakeVgaBase()
+    {
+        var p = new DatPalette();
+        for (int i = 0; i < 16; i++) (p.R[i], p.G[i], p.B[i]) = FlashColors[i];
+        return p;
+    }
 
     /// <summary>do_flash: the background colour (black) becomes the flash colour for the tick.</summary>
     private void Flash(int color)
@@ -180,8 +217,16 @@ public sealed class DosRenderer
         {
             if (op.Set == DosRoomDrawer.Set.Wipe)
             {
-                // Mono carries the wipe's height.
-                Frame.FillRect(op.X, op.YBottom - op.Mono + 1 + BackgroundYOffset, op.Width, op.Mono, 0, 0, 0);
+                // Mono carries the wipe's height, Id its colour: 0 black, or 0x60 + n,
+                // colour n of the wall palette (loaded at VGA 0x60 by load_lev_spr).
+                byte r = 0, g = 0, b = 0;
+                if (op.Id != 0)
+                {
+                    var wallPal = _env.PaletteForId(361);   // the wall group (images 361+)
+                    int n = op.Id & 15;
+                    (r, g, b) = (wallPal.R[n], wallPal.G[n], wallPal.B[n]);
+                }
+                Frame.FillRect(op.X, op.YBottom - op.Mono + 1 + BackgroundYOffset, op.Width, op.Mono, r, g, b);
                 continue;
             }
 
@@ -196,8 +241,8 @@ public sealed class DosRenderer
             if (img is null) continue;
 
             int y = op.YBottom - img.Height + 1 + BackgroundYOffset;
-            Frame.Blit(img, bank.PaletteForId(id), op.X, y, mirror: false,
-                       mode: op.Mode, monoColor: op.Mono);
+            var pal = op.Mode == BlitMode.Mono ? VgaBase : bank.PaletteForId(id);
+            Frame.Blit(img, pal, op.X, y, mirror: false, mode: op.Mode, monoColor: op.Mono & 15);
         }
     }
 
@@ -255,6 +300,9 @@ public sealed class DosRenderer
         int px = KidEngine.SpriteX(ch, f) * 320 / 280;
         if (ch.FacingRight) px -= img.Width;
         int py = ch.Y + f.Dy;
-        Frame.Blit(img, _kid.Palette, px, py - img.Height + 1, ch.FacingRight);
+        // clip_char: walls, doortops and the floor above cut the sprite off.
+        var c = sim.KidClip(_drawer.LeveldoorYBottom, _drawer.LeveldoorRight);
+        Frame.Blit(img, _kid.Palette, px, py - img.Height + 1, ch.FacingRight,
+                   clip: (c.Left, c.Top, c.Right, c.Bottom));
     }
 }

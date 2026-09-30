@@ -76,6 +76,7 @@ public sealed partial class KidEngine
     {
         int frame = _ch.Frame;
         _ch.Row++;
+        _hazards.StartChompers(_ch);
         _fallFrame = frame;
 
         int seq;
@@ -200,27 +201,46 @@ public sealed partial class KidEngine
     }
 
     /// <summary>
-    /// land (seg005): the landing depends on how fast he was falling: under 22 is a
-    /// soft crouch, under 33 costs a hit point (medium land), faster kills.
-    /// Spikes are not ported yet (they are never harmful here).
+    /// land (seg005): landing on spikes that are out impales; otherwise it depends on
+    /// how fast he was falling: under 22 is a soft crouch, under 33 costs a hit point
+    /// (medium land), faster kills.
     /// </summary>
     private void Land()
     {
         _ch.Y = Coord.FloorY(_ch.Row);
 
-        if (GetTileAtChar() != TileId.Spikes
-            && !TileIsFloor(GetTileInfrontofChar()) && DistanceToEdgeWeight() < 3)
+        bool onSpikes = GetTileAtChar() == TileId.Spikes;
+        if (!onSpikes)
         {
-            _ch.X = _ch.DxForward(-3);
+            if (!TileIsFloor(GetTileInfrontofChar()) && DistanceToEdgeWeight() < 3)
+                _ch.X = _ch.DxForward(-3);
+            _hazards.StartChompers(_ch);
+        }
+
+        // The original jumps from the "on spikes" test straight into the alive branch's
+        // spike check (goto loc_5EE6), dead or not. For the alive, the check reads the
+        // tile behind (well into the block) or the tile underfoot.
+        if (onSpikes
+            || (_ch.Alive && ((DistanceToEdgeWeight() >= 12 && GetTileBehindChar() == TileId.Spikes)
+                              || GetTileAtChar() == TileId.Spikes)))
+        {
+            if (IsSpikeHarmful() != 0)
+            {
+                Spiked();
+                return;
+            }
+        }
+        else if (!_ch.Alive)
+        {
+            TakeHp(100);
+            _seq.Start(_ch, Seq.HardLand);
+            PlaySeq();
+            _ch.FallY = 0;
+            return;
         }
 
         int seq;
-        if (!_ch.Alive)
-        {
-            TakeHp(100);
-            seq = Seq.HardLand;
-        }
-        else if (_ch.FallY < 22)
+        if (_ch.FallY < 22)
         {
             seq = Seq.SoftLand;
         }
@@ -407,13 +427,19 @@ public sealed partial class KidEngine
 
     /// <summary>
     /// is_obstacle: potions never block; a gate only while low; a chomper only while
-    /// closed. (A running jump through a mirror is not ported.)
+    /// closed; a mirror not to a running jump from right to left, which goes through it.
     /// </summary>
     private bool IsObstacle()
     {
         if (_currTile2 == TileId.Flask) return false;
         if (_currTile2 == TileId.Gate && !CanBumpIntoGate()) return false;
         if (_currTile2 == TileId.Slicer && Modif() != RoomView.SlicerExtended) return false;
+        if (_currTile2 == TileId.Mirror && _ch.Frame is >= 39 and < 44 && !_ch.FacingRight)
+        {
+            SetModif(0x56);                 // the mirror is jumped through
+            JumpedThroughMirror = true;
+            return false;
+        }
         _collTileLeftXpos = XposInDrawnRoom(Coord.BlockEdge(_tileCol)) + 7;
         return true;
     }

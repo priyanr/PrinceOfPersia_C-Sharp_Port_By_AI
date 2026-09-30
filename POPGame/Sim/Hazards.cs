@@ -14,7 +14,9 @@ namespace POPGame.Sim;
 /// and its shared globals (<c>trob</c>, <c>curmob</c>, <c>curr_room</c>,
 /// <c>curr_tilepos</c>, <c>curr_modifier</c>), so each one can be checked against
 /// the source. Sounds, redraw bookkeeping and the torch/potion/sword animations
-/// (cosmetic, drawn from the tick) are left out.
+/// (cosmetic, drawn from the tick) are left out. Chompers run here too
+/// (start_chompers / animate_chomper); what they do to the kid is check_chomped_kid
+/// in the kid engine.
 /// </summary>
 public sealed class Hazards
 {
@@ -47,10 +49,12 @@ public sealed class Hazards
 
     public bool ExitOpen => LeveldoorOpen != 0;
 
+    /// <summary>drawn_room: the room on screen (the kid's), which chompers keep running in.</summary>
+    public int DrawnRoom { get; set; }
+
     // Level data these routines tune (SDLPoP's custom-> values for the DOS game).
     private const int LooseFloorDelay = 11;
     private const int LooseTilesLevel = 13;
-    private static readonly byte[] TblLevelType = [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0];
 
     // ── room addressing (get_room_address / get_tile / get_curr_tile) ─────────
 
@@ -134,6 +138,7 @@ public sealed class Hazards
             case TileId.Spikes: AnimateSpike(); break;
             case TileId.Loose: AnimateLoose(); break;
             case TileId.Space: AnimateEmpty(); break;
+            case TileId.Slicer: AnimateChomper(); break;
             case TileId.Gate: AnimateDoor(); break;
             case TileId.Exit: AnimateLeveldoor(); break;
             default: _trob.Type = -1; break;
@@ -189,6 +194,72 @@ public sealed class Hazards
                 _currModifier = 0;
                 _trob.Type = -1;
             }
+        }
+    }
+
+    // ── chompers ──────────────────────────────────────────────────────────────
+
+    /// <summary>custom->chomper_speed: frames in a chomper's cycle (it is shut on frame 2).</summary>
+    private const int ChomperSpeed = 15;
+
+    /// <summary>
+    /// start_chompers (seg007): the chompers on the kid's row start (or keep) chomping,
+    /// each a few frames behind the last so a row of them doesn't bite in step. The
+    /// original calls this whenever the kid changes row or room and when he lands.
+    /// </summary>
+    public void StartChompers(CharState kid)
+    {
+        int timing = 15;
+        if ((uint)kid.Row >= 3 || !ValidRoom(kid.Room)) return;
+        _currRoom = kid.Room;
+        for (int column = 0, tilepos = kid.Row * Coord.Cols; column < Coord.Cols; ++column, ++tilepos)
+        {
+            if (GetCurrTile(tilepos) != (int)TileId.Slicer) continue;
+            int modifier = _currModifier & 0x7F;
+            if (modifier == 0 || modifier >= 6)
+            {
+                StartAnimChomper(kid.Room, tilepos, (byte)(timing | (_currModifier & 0x80)));
+                timing = NextChomperTiming(timing);
+            }
+        }
+    }
+
+    /// <summary>next_chomper_timing: 15, 12, 9, 6, 13, 10, 7, 14, 11, 8, repeat.</summary>
+    private static int NextChomperTiming(int timing)
+    {
+        timing -= 3;
+        if (timing < 6) timing += 10;
+        return timing;
+    }
+
+    /// <summary>start_anim_chomper.</summary>
+    private void StartAnimChomper(int room, int tilepos, byte modifier)
+    {
+        int oldModifier = ModAt(room, tilepos);
+        if (oldModifier == 0 || oldModifier >= 6)
+        {
+            SetMod(room, tilepos, modifier);
+            AddTrob(room, tilepos, 1);
+        }
+    }
+
+    /// <summary>
+    /// animate_chomper: step the jaws through their cycle, keeping the blood bit (0x80).
+    /// Past frame 6 (open) it stops once the kid has left its room or row, or has died
+    /// somewhere else.
+    /// </summary>
+    private void AnimateChomper()
+    {
+        if (_trob.Type < 0) return;
+        int blood = _currModifier & 0x80;
+        int frame = (_currModifier & 0x7F) + 1;
+        if (frame > ChomperSpeed) frame = 1;
+        _currModifier = (byte)(blood | frame);
+        if (Kid is not { } kid) return;
+        if ((_trob.Room != DrawnRoom || _trob.Tilepos / Coord.Cols != kid.Row || (!kid.Alive && blood == 0))
+            && (_currModifier & 0x7F) >= 6)
+        {
+            _trob.Type = -1;
         }
     }
 
@@ -474,7 +545,7 @@ public sealed class Hazards
     private byte RemoveLoose(int room, int tilepos)
     {
         SetTile(room, tilepos, (int)TileId.Space);
-        return TblLevelType[Math.Clamp(_levelNumber, 0, TblLevelType.Length - 1)];
+        return (byte)DosLevels.LevelType(_levelNumber);
     }
 
     /// <summary>

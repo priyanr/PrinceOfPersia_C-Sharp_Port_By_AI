@@ -30,6 +30,12 @@ public sealed class SeqRunner
 
     public SeqRunner(DosTables tables) => _tables = tables;
 
+    /// <summary>
+    /// Called when the up/down opcodes change a character's row; play_seq calls
+    /// start_chompers there.
+    /// </summary>
+    public Action<CharState>? RowChanged { get; set; }
+
     /// <summary>Points a character at the start of sequence <paramref name="seqId"/>.</summary>
     public void Start(CharState ch, int seqId)
     {
@@ -70,10 +76,12 @@ public sealed class SeqRunner
 
                 case SeqOp.Up:
                     ch.Row--;
+                    RowChanged?.Invoke(ch);
                     continue;
 
                 case SeqOp.Down:
                     ch.Row++;
+                    RowChanged?.Invoke(ch);
                     continue;
 
                 case SeqOp.Act:

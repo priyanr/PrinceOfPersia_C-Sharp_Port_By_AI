@@ -57,7 +57,8 @@ Image: `uint16 height, width, flags`; `depth=((flags>>12)&7)+1`, `cmeth=(flags>>
 (0 raw, 1 RLE-lr, 2 RLE-ud, 3 LZG-lr, 4 LZG-ud); MSB-first; index 0 transparent.
 A DAT can hold **several palette groups** and loose resources outside them (a palette
 parses as an image of width 4096). Chtab ids: dungeon N = VDUNGEON `200+N`, walls N =
-`360+N` (palette 360 — dump with 360 or it's miscoloured), flame/potion/sword N =
+`360+N` (palette 360 — dump with 360 or it's miscoloured); palace levels
+(`DosLevels.LevelType`) use VPALACE.DAT with the same ids, flame/potion/sword N =
 PRINCE.DAT `150+N`. Colour 6->8 bit is `(v<<2)|(v>>4)`.
 
 ## Coordinates (`Sim/Coord.cs`, TABLES.S)
@@ -77,7 +78,7 @@ Dos/        DosGame, DatFile, DatImage, DosImageBank, DosTables, ExePack,
 Sim/        Coord, CharState (+CharAction, Seq ids), SeqRunner (play_seq / ANIMCHAR),
             RoomView, KidEngine (SDLPoP port: .cs frame order/tiles/room exit,
             .Physics.cs falls/landing/grab/wall collisions, .Control.cs controls,
-            .Items.cs sword/potions), Hazards (seg007 port: trobs = plates, gates,
+            .Items.cs sword/potions, .Clip.cs clip_char), Hazards (seg007 port: trobs = plates, gates,
             exit door, loose floors, spikes; mobs = falling floor pieces;
             check_press, check_knock), Simulation
 Rendering/  Framebuffer (320x200), DosRoomDrawer (DRAW_ROOM port), DosRenderer

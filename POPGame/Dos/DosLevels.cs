@@ -18,6 +18,16 @@ public sealed class DosLevels
 
     public static DosLevels Load() => new(DosGame.File("LEVELS.DAT"));
 
+    // custom->tbl_level_type (SDLPoP): 0 dungeon, 1 palace, for levels 0..15.
+    private static readonly byte[] TblLevelType = [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0];
+
+    /// <summary>
+    /// tbl_level_type: 0 for a dungeon level, 1 for a palace level. It picks the
+    /// graphics file (VDUNGEON / VPALACE.DAT), the palace branches of the room drawer,
+    /// and the modifier a fallen loose floor leaves behind.
+    /// </summary>
+    public static int LevelType(int level) => TblLevelType[Math.Clamp(level, 0, TblLevelType.Length - 1)];
+
     public bool Has(int level) => _dat.Has(FirstId + level);
 
     public Level Get(int level)

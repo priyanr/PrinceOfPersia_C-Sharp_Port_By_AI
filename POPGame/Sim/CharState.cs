@@ -88,4 +88,7 @@ public sealed class CharState
     public void AddX(int dx) => X = DxForward(dx);
 
     public void Flip() => Face = (sbyte)~Face;
+
+    /// <summary>A copy, as loadkid makes one for drawing.</summary>
+    public CharState Clone() => (CharState)MemberwiseClone();
 }

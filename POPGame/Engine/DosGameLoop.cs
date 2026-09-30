@@ -45,9 +45,12 @@ public sealed class DosGameLoop
                 acc -= TickSeconds;
                 sim.Tick(input);
 
+                // A dead kid stays down until Shift or Enter (seg000: Kid.alive > 6).
+                bool restart = Raylib.IsKeyPressed(KeyboardKey.R)
+                               || (sim.CanRestart && (input.Action || Raylib.IsKeyDown(KeyboardKey.Enter)));
                 if (sim.Effects.NextLevel && levels.Has(sim.LevelNumber + 1))
                     sim.LoadLevel(levels.Get(sim.LevelNumber + 1), sim.LevelNumber + 1);
-                else if (sim.Effects.Died || Raylib.IsKeyPressed(KeyboardKey.R))
+                else if (restart)
                     sim.LoadLevel(levels.Get(sim.LevelNumber), sim.LevelNumber);
             }
 
@@ -90,8 +93,17 @@ public sealed class DosGameLoop
         var k = sim.Kid;
         Raylib.DrawText($"HP {new string('|', Math.Max(0, k.Hp))}   level {sim.LevelNumber}   room {k.Room}",
                         6, 6, 20, Color.Red);
-        Raylib.DrawText("arrows move/jump/crouch   shift = careful step   R = restart level",
-                        6, DosRenderer.ScreenH * Scale - 26, 16, Color.DarkGray);
+        if (sim.ShowPressButton)
+        {
+            const string msg = "Press Button to Continue";
+            int w = Raylib.MeasureText(msg, 24);
+            Raylib.DrawText(msg, (DosRenderer.ScreenW * Scale - w) / 2, DosRenderer.ScreenH * Scale - 30, 24, Color.White);
+        }
+        else
+        {
+            Raylib.DrawText("arrows move/jump/crouch   shift = careful step   R = restart level",
+                            6, DosRenderer.ScreenH * Scale - 26, 16, Color.DarkGray);
+        }
         Raylib.DrawText($"x{k.X} y{k.Y} row{k.Row} col{k.Col} frame{k.Frame} act{(int)k.Action} seq{k.CurrentSeq}",
                         6, 30, 14, Color.DarkGray);
     }

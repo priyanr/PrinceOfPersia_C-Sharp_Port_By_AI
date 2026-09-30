@@ -57,10 +57,40 @@ public sealed class Simulation
             StartRoom = Level.KidStartScrn,
         };
         _hazards.LooseFellOnKid = () => _engine.LooseFellOnKid(Kid, Effects);
+        _seq.RowChanged = ch => _hazards.StartChompers(ch);
+        _deadCounter = -1;
         StartPos(Level.KidStartScrn, Level.KidStartBlock, Level.KidStartFace == 0xFF ? -1 : 0,
                  fallingEntry: LevelNumber == 1);
         _hazards.FindStartLevelDoor(Kid.Room);
     }
+
+    /// <summary>
+    /// check_the_end (seg000): when the kid has moved to another room, that room is
+    /// the one drawn, and its chompers on his row start.
+    /// </summary>
+    private void CheckTheEnd()
+    {
+        if (Kid.Room == 0 || Kid.Room == _hazards.DrawnRoom) return;
+        _hazards.DrawnRoom = Kid.Room;
+        _hazards.StartChompers(Kid);
+    }
+
+    // Kid.alive once he is dead: 0 on the tick he dies, then one more each tick his
+    // death frame (177 spiked, 178 chomped, 185 dead) is showing. -1 while alive.
+    private int _deadCounter = -1;
+
+    /// <summary>
+    /// The kid is dead and the level can be restarted (Kid.alive &gt; 6: Shift or Enter
+    /// restarts, seg000). The original waits for the death music; with no sound it
+    /// counts ticks from the death frame, as it does when the sound is off.
+    /// </summary>
+    public bool CanRestart => _deadCounter > 6;
+
+    /// <summary>"Press Button to Continue" is shown (not on the demo or level 15).</summary>
+    public bool ShowPressButton => CanRestart && LevelNumber is not (0 or 15);
+
+    /// <summary>is_dead (seg006): showing a death frame.</summary>
+    private static bool IsDeadFrame(int frame) => frame is >= 177 and <= 178 or 185;
 
     /// <summary>The level's animated tiles and falling floor pieces.</summary>
     public Hazards Hazards => _hazards;
@@ -89,6 +119,9 @@ public sealed class Simulation
         // the gate beside the first room, authored open, slams shut as the kid drops in.
         if (fallingEntry) _hazards.PressButton(5, 2, 0);
         _engine.StartPos(Kid, Effects, room, block, face, fallingEntry);
+        _deadCounter = -1;
+        _hazards.DrawnRoom = 0;
+        CheckTheEnd();
     }
 
     public void Tick(InputState input)
@@ -101,7 +134,14 @@ public sealed class Simulation
         _hazards.DoMobs();
         _hazards.ProcessTrobs();
         _engine.PlayKidFrame(Kid, input, Effects);
+        if (!Kid.Alive)
+        {
+            // control_kid / play_kid (seg006).
+            if (_deadCounter < 0) _deadCounter = 0;
+            else if (IsDeadFrame(Kid.Frame)) _deadCounter++;
+        }
         _engine.ExitRoom(Kid);
+        CheckTheEnd();
 
         Flash = 0;
         if (_engine.FlashTime != 0)
@@ -121,6 +161,10 @@ public sealed class Simulation
         get => _engine.DemoMode;
         set => _engine.DemoMode = value;
     }
+
+    /// <summary>clip_char: the rectangle the kid's sprite is drawn in this frame.</summary>
+    public ClipRect KidClip(int leveldoorYBottom, int leveldoorRight) =>
+        _engine.ClipChar(Kid, leveldoorYBottom, leveldoorRight);
 
     public FrameDef KidFrame => Tables.Frames[Math.Clamp(Kid.Frame, 0, DosTables.FrameCount)];
 }

@@ -45,14 +45,15 @@ public sealed class DosRoomDrawer
     {
         /// <summary>Palette index 1 of PRINCE.DAT: flames, potions, sword.</summary>
         Flame = 1,
-        /// <summary>VDUNGEON.DAT resource 200 + id.</summary>
+        /// <summary>VDUNGEON.DAT (VPALACE.DAT on palace levels) resource 200 + id.</summary>
         Env = 6,
-        /// <summary>VDUNGEON.DAT resource 360 + id: the wall bodies and brick detail.</summary>
+        /// <summary>Resource 360 + id of the same file: the wall bodies and brick detail.</summary>
         Wall = 7,
-        /// <summary>A black rectangle, not an image.</summary>
+        /// <summary>A filled rectangle, not an image (the original's wipetable).</summary>
         Wipe = 99,
     }
 
+    /// <param name="Id">For a wipe, its colour: 0 black, else a VGA index 0x60..0x6F (the wall palette).</param>
     /// <param name="YBottom">Bottom row of the image; for a wipe, its bottom edge.</param>
     /// <param name="Mono">Palette index for <see cref="BlitMode.Mono"/>; for a wipe, its height.</param>
     /// <param name="Width">Only used by a wipe.</param>
@@ -61,6 +62,13 @@ public sealed class DosRoomDrawer
 
     public List<Op> Back { get; } = [];
     public List<Op> Fore { get; } = [];
+
+    /// <summary>
+    /// The wipetable, by layer. draw_tables draws layer 0 before the back table and
+    /// layer 1 after the characters, before the front table.
+    /// </summary>
+    public List<Op> WipesBack { get; } = [];
+    public List<Op> WipesFore { get; } = [];
 
     private readonly DosDrawTables _t;
 
@@ -75,6 +83,8 @@ public sealed class DosRoomDrawer
 
     private Level _level = null!;
     private int _tick;
+    private bool _palace;
+    private readonly byte[] _palaceWallColors = new byte[3 * 44];
     private int _kidRoom, _kidRow, _kidCol;
 
     private int _drawnRoom, _drawnRow, _drawnCol;
@@ -87,19 +97,28 @@ public sealed class DosRoomDrawer
 
     private List<Op> _addTo = null!;
 
+    /// <summary>leveldoor_ybottom / leveldoor_right of the last exit door drawn, for clip_char.</summary>
+    public int LeveldoorYBottom { get; private set; }
+    public int LeveldoorRight { get; private set; }
+
     public DosRoomDrawer(DosDrawTables tables) => _t = tables;
 
     /// <summary>
     /// Lays out <paramref name="room"/>. The kid's cell decides whether a gate is drawn
     /// in front of him, and <paramref name="tick"/> drives torches and potions.
+    /// <paramref name="levelType"/> is tbl_level_type: 0 dungeon, 1 palace.
     /// </summary>
-    public void Build(Level level, int room, int kidRoom, int kidRow, int kidCol, int tick)
+    public void Build(Level level, int room, int kidRoom, int kidRow, int kidCol, int tick, int levelType = 0)
     {
         Back.Clear();
         Fore.Clear();
+        WipesBack.Clear();
+        WipesFore.Clear();
         _level = level;
         _tick = tick;
         _kidRoom = kidRoom; _kidRow = kidRow; _kidCol = kidCol;
+        _palace = levelType != 0;
+        if (_palace) GenPalaceWallColors(room);
 
         // DRAW_ROOM: rows bottom to top, then the bottom row of the room above.
         _drawnRoom = room;
@@ -247,8 +266,13 @@ public sealed class DosRoomDrawer
     private void Table(Set set, int id, int xh, int xl, int y, BlitMode mode)
         => Add(_addTo, set, id, xh, xl, y, mode);
 
-    private void Wipe(int x, int yBottom, int height, int width)
-        => Back.Add(new Op(Set.Wipe, 0, x, yBottom, BlitMode.NoTrans, height, width));
+    /// <summary>ptr_add_table with a mono blitter (blitters_40h_mono + colour).</summary>
+    private void TableMono(Set set, int id, int xh, int xl, int y, int color)
+        => Add(_addTo, set, id, xh, xl, y, BlitMode.Mono, color);
+
+    /// <summary>add_wipetable: layer 0 goes under the back table, layer 1 over the characters.</summary>
+    private void Wipe(int layer, int x, int yBottom, int height, int width, int color = 0)
+        => (layer == 0 ? WipesBack : WipesFore).Add(new Op(Set.Wipe, color, x, yBottom, BlitMode.NoTrans, height, width));
 
     // ---- the tile drawing, one function per original routine ---------------------
 
@@ -293,11 +317,20 @@ public sealed class DosRoomDrawer
         Back_(Set.Env, 42, _drawXh, 0, T(Floor).RightY + _drawMainY, BlitMode.Black);
     }
 
+    // doortop_fram_top / doortop_fram_bot (SDLPoP seg008): the palace doorway's
+    // arch pieces. Not yet located in PRINCE.EXE; the values are SDLPoP's.
+    private static readonly byte[] DoortopFramTop = [0, 81, 83, 0];
+    private static readonly byte[] DoortopFramBot = [78, 80, 82, 0];
+
     private void DrawTileTopRight()
     {
-        int below = _rowBelowLeft[_drawnCol].Tile;
-        if (below is DoorTopWithFloor or DoorTop) return;   // palace only
-        if (below == Wall)
+        var (below, belowMod) = _rowBelowLeft[_drawnCol];
+        if (below is DoorTopWithFloor or DoorTop)
+        {
+            if (!_palace) return;
+            Back_(Set.Env, DoortopFramTop[belowMod & 3], _drawXh, 0, _drawBottomY, BlitMode.Or);
+        }
+        else if (below == Wall)
             Back_(Set.Wall, 2, _drawXh, 0, _drawBottomY, BlitMode.Or);
         else
             Back_(Set.Env, T(below).TopRightId, _drawXh, 0, _drawBottomY, BlitMode.Or);
@@ -334,6 +367,8 @@ public sealed class DosRoomDrawer
                     }
                     Back_(Set.Env, id, _drawXh, 0, T(_tileLeft).RightY + _drawMainY, mode);
                 }
+                if (_palace)
+                    Back_(Set.Env, T(_tileLeft).StripeId, _drawXh, 0, _drawMainY - 27, BlitMode.Or);
                 if (_tileLeft is Torch or TorchWithDebris)
                     Back_(Set.Env, 146, _drawXh, 0, _drawBottomY - 28, BlitMode.NoTrans);
                 break;
@@ -346,14 +381,18 @@ public sealed class DosRoomDrawer
             {
                 Table(Set.Env, 42, _drawXh, 0, T(_tileLeft).RightY + _drawMainY, BlitMode.Trans);
                 int num = _modLeft > 3 ? 0 : _modLeft;
-                if (num == 0) return;   // dungeon: modifier 0 is a bare wall
+                if (num == (_palace ? 1 : 0)) return;   // the level type's bare wall
                 Back_(Set.Env, _t.BlueLine3[num], _drawXh, 0, _drawMainY - 20, BlitMode.NoTrans);
                 break;
             }
             case DoorTopWithFloor:
             case DoorTop:
-                return;   // palace only
+                if (!_palace) return;
+                Back_(Set.Env, DoortopFramBot[_modLeft & 3], _drawXh, 0, T(_tileLeft).RightY + _drawMainY, BlitMode.Or);
+                break;
             case Wall:
+                if (_palace && (_modLeft & 0x80) == 0)
+                    Back_(Set.Env, 84, _drawXh + 3, 0, _drawMainY - 27, BlitMode.NoTrans);   // wall stripe
                 Back_(Set.Wall, 1, _drawXh, 0, T(_tileLeft).RightY + _drawMainY, BlitMode.Or);
                 break;
         }
@@ -391,7 +430,7 @@ public sealed class DosRoomDrawer
         switch (_currTile)
         {
             case Wall:
-                id = _t.WallBottom[_currMod & 3];
+                id = _palace ? 0 : _t.WallBottom[_currMod & 3];     // palace walls are all pattern
                 set = Set.Wall;
                 break;
             case DoorTop:
@@ -422,7 +461,7 @@ public sealed class DosRoomDrawer
 
         if (_tileLeft == LatticeDown && _currTile == DoorTop) { id = 6; yBottom += 3; }
         else if (_currTile == Loose) id = _t.LooseLeft[LooseFrame(_currMod)];
-        else if (_currTile == Opener && _tileLeft == Empty) id = 148;   // no floor to the left
+        else if (_currTile == Opener && _tileLeft == Empty && !_palace) id = 148;   // no floor to the left
         else id = T(_currTile).BaseId;
 
         Table(Set.Env, id, _drawXh, 0, T(_currTile).BaseY + yBottom, BlitMode.Trans);
@@ -489,7 +528,8 @@ public sealed class DosRoomDrawer
             }
 
             case Wall:
-                Fore_(Set.Wall, _t.WallMain[_currMod & 3], _drawXh, 0, _drawMainY, BlitMode.NoTrans);
+                if (!_palace)
+                    Fore_(Set.Wall, _t.WallMain[_currMod & 3], _drawXh, 0, _drawMainY, BlitMode.NoTrans);
                 WallPattern(true, true);
                 break;
 
@@ -506,11 +546,12 @@ public sealed class DosRoomDrawer
                 {
                     int type = (_currMod & 0xF8) >> 3;
                     if (type is >= 2 and < 5) id = 13;
+                    if (_palace) id += 2;                   // palace pots look different
                     Fore_(Set.Flame, id, xh, 6, y, BlitMode.Trans);
                 }
                 else
                 {
-                    var mode = _currTile == Pillar || _currTile is >= LatticeSmall and < TorchWithDebris
+                    var mode = (_currTile == Pillar && !_palace) || _currTile is >= LatticeSmall and < TorchWithDebris
                         ? BlitMode.NoTrans : BlitMode.Trans;
                     Fore_(Set.Env, id, xh, 0, y, mode);
                 }
@@ -574,14 +615,17 @@ public sealed class DosRoomDrawer
     private void DrawLevelDoor()
     {
         int yBottom = _drawMainY - 13;
+        LeveldoorRight = (_drawXh << 3) + 48 + (_palace ? 8 : 0);
         Back_(Set.Env, 99, _drawXh + 1, 0, yBottom, BlitMode.NoTrans);
 
         if (_modLeft != 0)
         {
             if (_level.KidStartScrn != _drawnRoom)
                 Back_(Set.Env, 144, _drawXh + 1, 0, yBottom - 4, BlitMode.NoTrans);
+            else if (_palace)
+                Wipe(0, 8 * (_drawXh + 1), yBottom - 4, 45, 48);
             else
-                Wipe(8 * (_drawXh + 1) + 2, yBottom - 4, 45, 39);
+                Wipe(0, 8 * (_drawXh + 1) + 2, yBottom - 4, 45, 39);   // dungeon doors sit 2px right
         }
 
         int doorY = yBottom - (_modLeft & 3) - 48;
@@ -592,6 +636,7 @@ public sealed class DosRoomDrawer
             if (y > doorY) doorY += 4;
             else break;
         }
+        LeveldoorYBottom = doorY;
         Back_(Set.Env, 34, _drawXh + 1, 0, _drawMainY - 64, BlitMode.NoTrans);
     }
 
@@ -605,9 +650,37 @@ public sealed class DosRoomDrawer
     }
 
     /// <summary>
-    /// WALL_PATTERN (dungeon branch): the brick seams and chipped marks on a wall. The
-    /// PRNG is reseeded from the cell's position every time, so the "random" masonry is
-    /// identical on every visit and between the back and front halves of one wall.
+    /// gen_palace_wall_colors (seg000): each palace room's bricks get colours 0x66..0x69
+    /// (courses 0 and 2) and 0x61..0x64 (courses 1 and 3), never the same twice in a
+    /// row, from the PRNG seeded with the room number. Regenerated on every room change.
+    /// </summary>
+    private void GenPalaceWallColors(int room)
+    {
+        uint savedSeed = _seed;
+        _seed = (uint)room;
+        PRandom(1);
+        for (int row = 0; row < 3; row++)
+        for (int subrow = 0; subrow < 4; subrow++)
+        {
+            int colorBase = subrow % 2 != 0 ? 0x61 : 0x66;
+            int prev = -1;
+            for (int column = 0; column <= 10; column++)
+            {
+                int color;
+                do color = colorBase + PRandom(3);
+                while (color == prev);
+                _palaceWallColors[44 * row + 11 * subrow + column] = (byte)color;
+                prev = color;
+            }
+        }
+        _seed = savedSeed;
+    }
+
+    /// <summary>
+    /// WALL_PATTERN: the brick seams and chipped marks on a wall. The PRNG is reseeded
+    /// from the cell's position every time, so the "random" masonry is identical on
+    /// every visit and between the back and front halves of one wall. Palace walls are
+    /// solid-colour bricks (wipes) with divider decals in wall colour 6.
     /// </summary>
     private void WallPattern(bool front, bool foreTable)
     {
@@ -617,6 +690,31 @@ public sealed class DosRoomDrawer
 
         _seed = (uint)(_drawnRoom + _drawnRow * 10 + _drawnCol);
         PRandom(1);
+
+        if (_palace)
+        {
+            int layer = foreTable ? 1 : 0;
+            int c = 44 * Math.Clamp(_drawnRow, 0, 2) + _drawnCol;
+            if (front)
+            {
+                Wipe(layer, 8 * _drawXh, _drawMainY - 40, 20, 4 * 8, _palaceWallColors[c]);
+                Wipe(layer, 8 * _drawXh, _drawMainY - 19, 21, 2 * 8, _palaceWallColors[c + 11]);
+                Wipe(layer, 8 * (_drawXh + 2), _drawMainY - 19, 21, 2 * 8, _palaceWallColors[c + 12]);
+                Wipe(layer, 8 * _drawXh, _drawMainY, 19, 1 * 8, _palaceWallColors[c + 22]);
+                Wipe(layer, 8 * (_drawXh + 1), _drawMainY, 19, 3 * 8, _palaceWallColors[c + 23]);
+
+                TableMono(Set.Wall, PRandom(2) + 3, _drawXh + 3, 0, _drawMainY - 53, 6);
+                TableMono(Set.Wall, PRandom(2) + 6, _drawXh, 0, _drawMainY - 34, 6);
+                TableMono(Set.Wall, PRandom(2) + 9, _drawXh, 0, _drawMainY - 13, 6);
+                TableMono(Set.Wall, PRandom(2) + 12, _drawXh, 0, _drawMainY, 6);
+            }
+            Wipe(layer, 8 * _drawXh, _drawBottomY, 3, 4 * 8, _palaceWallColors[c + 33]);
+            TableMono(Set.Wall, PRandom(2) + 15, _drawXh, 0, _drawBottomY, 6);
+
+            _seed = savedSeed;
+            _addTo = savedTable;
+            return;
+        }
 
         int middleDivider = PRandom(1);
         int middleOffset = PRandom(4);
