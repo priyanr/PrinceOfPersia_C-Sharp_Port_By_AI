@@ -37,18 +37,22 @@ public enum SeqOp : byte
 }
 
 /// <summary>
-/// The animation tables lifted straight out of the DOS PRINCE.EXE, which is not
-/// packed. Offsets were located by matching byte patterns from the Apple II
-/// FRAMEDEF.S / SEQTABLE.S sources and cross-checked against two anchors each.
+/// The animation tables lifted out of the DOS PRINCE.EXE. The file is EXEPACK
+/// compressed, so the tables are read from the unpacked load image
+/// (<see cref="ExePack.Unpack"/>), not from the file: in the file, runs such as
+/// medland's 29 x frame 109 are stored as fill/copy commands, and every sequence
+/// after them is shifted. Offsets were located by matching byte patterns from the
+/// Apple II FRAMEDEF.S / SEQTABLE.S sources.
 ///
 /// The bytecode layout is identical to the Apple II source: a positive byte is a
 /// frame number, a negative byte is an opcode (see <see cref="SeqOp"/>).
 /// </summary>
 public sealed class DosTables
 {
-    private const int FrameTableOffset = 0x1B9AA;   // frame N at +(N-1)*5
-    private const int SeqBytecodeBase  = 0x1A8ED;   // offset 0 of the sequence bytecode
-    private const int SeqIndexBase     = 0x1C175;   // words, 1-indexed by sequence id
+    // Offsets into the unpacked load image (no MZ header).
+    private const int FrameTableOffset = 0x1BCC5;   // frame N at +(N-1)*5
+    private const int SeqBytecodeBase  = 0x1ACE0;   // offset 0 of the sequence bytecode
+    private const int SeqIndexBase     = 0x1C568;   // words, 1-indexed by sequence id
 
     public const int FrameCount = 240;
     public const int SequenceCount = 114;
@@ -61,9 +65,10 @@ public sealed class DosTables
 
     public DosTables(string princeExePath)
     {
-        byte[] exe = File.ReadAllBytes(princeExePath);
+        byte[] exe = ExePack.Unpack(File.ReadAllBytes(princeExePath));
 
         Frames = new FrameDef[FrameCount + 1];      // 1-based
+        Frames[0] = new FrameDef(0xFF, 0, 0, 0, 0);  // frame 0 is blank, as in the original
         for (int n = 1; n <= FrameCount; n++)
         {
             int o = FrameTableOffset + (n - 1) * 5;
@@ -104,6 +109,13 @@ public sealed class DosTables
         p = SeqStart[2];
         if (Seq[p] != (byte)SeqOp.Act || Seq[p + 1] != 0 || Seq[p + 2] != 15)
             return $"sequence 2 (stand) does not start with act,0,15 at 0x{p:x4}";
+
+        // medland (sequence 20) holds frame 108 then 109 x 29 (SEQTABLE.S:1352). In the
+        // packed file this run is a fill command, so this catches a packed read.
+        p = SeqStart[20];
+        int at108 = Array.IndexOf(Seq, (byte)108, p, 16);
+        if (at108 < 0 || Enumerable.Range(at108 + 1, 29).Any(i => Seq[i] != 109))
+            return $"sequence 20 (medland) does not hold frame 109 x 29 at 0x{p:x4}";
 
         // Frame 15 is the standing kid: chtab image 14, sword 9, no offset.
         if (Frames[15].Image != 14 || Frames[15].Sword != 9)

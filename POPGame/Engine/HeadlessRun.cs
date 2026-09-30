@@ -48,6 +48,17 @@ public static class HeadlessRun
         var renderer = new DosRenderer();
         var input = new InputState();
 
+        // POP_START=room,block,face (face -1 = left, 0 = right) starts the kid standing
+        // somewhere other than the level's start, e.g. right beside a gap to test.
+        if (Environment.GetEnvironmentVariable("POP_START") is { Length: > 0 } start)
+        {
+            var p = start.Split(',').Select(int.Parse).ToArray();
+            sim.PlaceKid(p[0], p[1], p[2]);
+        }
+
+        // POP_DEMO=1 drives the kid from the demo move table (level 0's attract mode).
+        if (Environment.GetEnvironmentVariable("POP_DEMO") == "1") sim.DemoMode = true;
+
         var steps = Parse(script).ToList();
         Console.WriteLine($"level {level}: {steps.Count} ticks -> {outDir}");
 
@@ -65,7 +76,7 @@ public static class HeadlessRun
 
             var k = sim.Kid;
             Console.WriteLine($"  t{tick,3} keys={steps[tick],-5} rm{k.Room} x{k.X,3} y{k.Y,3} " +
-                              $"row{k.Row} frame{k.Frame,3} act{(int)k.Action} seq{k.CurrentSeq}");
+                              $"row{k.Row} col{k.Col} frame{k.Frame,3} act{(int)k.Action} seq{k.CurrentSeq}");
         }
 
         Console.WriteLine($"wrote {written} frames");

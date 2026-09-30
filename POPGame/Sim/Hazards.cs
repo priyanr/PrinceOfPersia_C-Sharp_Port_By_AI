@@ -1,4 +1,5 @@
 using POPGame.Data;
+using POPGame.Dos;
 using POPGame.Engine;
 
 namespace POPGame.Sim;
@@ -15,8 +16,11 @@ public sealed class Hazards
     // Loose floors that have been stepped on: key -> ticks since triggered.
     private readonly Dictionary<(int Screen, int Cell), int> _looseShaking = new();
 
-    /// <summary>Set once the kid reaches an opened exit.</summary>
-    public bool LevelComplete { get; private set; }
+    /// <summary>
+    /// leveldoor_open: an opener has raised the exit door. The kid leaves the level by
+    /// pressing Up at it (up_pressed), which plays the stairs sequence.
+    /// </summary>
+    public bool ExitOpen => _exitOpen;
 
     public Hazards(Level level)
     {
@@ -24,9 +28,9 @@ public sealed class Hazards
         _links = new Links(level);
     }
 
-    public void Tick(CharState kid, SeqEffects fx)
+    public void Tick(CharState kid, FrameDef frame, SeqEffects fx)
     {
-        StandOnTile(kid);
+        CheckPress(kid, frame);
         TickPlates();
         TickGates();
         TickLoose(kid);
@@ -34,40 +38,75 @@ public sealed class Hazards
 
     // ── the tile the kid is standing on ───────────────────────────────────────
 
-    private void StandOnTile(CharState kid)
+    /// <summary>
+    /// CHECKPRESS (CTRL.S:1939): is the kid stepping on a pressure plate or a loose
+    /// floor? Hanging and climbing frames press the tile above; the on-the-ground
+    /// actions press the tile underfoot, but only on frames whose foot touches the
+    /// floor (<c>fcheckmark</c>). Midair and freefall never press anything, so a kid
+    /// falling past a plate does not trigger it.
+    /// </summary>
+    private void CheckPress(CharState kid, FrameDef frame)
     {
-        int col = kid.BlockX;
-        if (col is < 0 or >= Coord.Cols) return;
-        if (kid.Row is < 0 or >= Coord.Rows) return;
+        int f = kid.Frame;
+        int row;
 
-        int s0 = kid.Room - 1;
-        if (s0 < 0 || s0 >= Level.NumScreens) return;
+        if (f is >= 87 and < 100 or >= 135 and < 141)
+        {
+            row = kid.Row - 1;                              // hanging on the ledge above
+        }
+        else if (kid.Action is CharAction.Turn or CharAction.Bumped
+                 or CharAction.Stand or CharAction.RunJump)
+        {
+            if (f == 79)                                    // jumping up to touch the ceiling
+            {
+                if (CellAt(kid, kid.Row - 1) is { Tile: TileId.Loose } above) BreakLoose(above);
+                return;
+            }
+            if (!frame.Check) return;                       // foot isn't touching floor
+            row = kid.Row;
+        }
+        else return;
 
-        var tile = _level.GetTileId(s0, kid.Row, col);
-        int cell = kid.Row * Coord.Cols + col;
-
-        switch (tile)
+        if (CellAt(kid, row) is not { } cell) return;
+        switch (cell.Tile)
         {
             case TileId.PressPlate:
                 // Tile 6 is a CLOSER: it slams its gates shut rather than raising them.
-                PushPlate(_level.GetSpec(s0, kid.Row, col), close: true);
+                PushPlate(_level.GetSpec(cell.Room - 1, cell.Row, cell.Col), close: true);
                 break;
 
             case TileId.UPressPlate:
-            case TileId.DPressPlate:
-                PushPlate(_level.GetSpec(s0, kid.Row, col), close: false);
+                PushPlate(_level.GetSpec(cell.Room - 1, cell.Row, cell.Col), close: false);
                 break;
 
             case TileId.Loose:
-                _looseShaking.TryAdd((kid.Room, cell), 0);
-                break;
-
-            case TileId.Exit:
-            case TileId.Exit2:
-                if (_exitOpen) LevelComplete = true;
+                BreakLoose(cell);
                 break;
         }
     }
+
+    private readonly record struct Cell(int Room, int Row, int Col, TileId Tile);
+
+    /// <summary>
+    /// The tile in the kid's column and <paramref name="row"/>, following the MAP links
+    /// when that is outside his room (get_tile). Null beyond the edge of the level.
+    /// </summary>
+    private Cell? CellAt(CharState kid, int row)
+    {
+        int room = kid.Room, col = kid.Col;
+        while (room != 0)
+        {
+            if (col < 0) { col += Coord.Cols; room = _level.Left(room); }
+            else if (col >= Coord.Cols) { col -= Coord.Cols; room = _level.Right(room); }
+            else if (row < 0) { row += Coord.Rows; room = _level.Above(room); }
+            else if (row >= Coord.Rows) { row -= Coord.Rows; room = _level.Below(room); }
+            else return new Cell(room, row, col, _level.GetTileId(room - 1, row, col));
+        }
+        return null;
+    }
+
+    private void BreakLoose(Cell cell) =>
+        _looseShaking.TryAdd((cell.Room, cell.Row * Coord.Cols + cell.Col), 0);
 
     /// <summary>
     /// PUSHPP (MOVER.S:425): hold the plate down for pptimer ticks, and trigger

@@ -32,6 +32,16 @@ public static class Coord
     /// <summary>Offset 0..13 of x within its block.</summary>
     public static int PixelX(int x) => Mod(x - ScrnLeft, BlockWidth);
 
+    /// <summary>
+    /// get_tile_div_mod_m7: the column of a character-plane x. Characters stand
+    /// <c>angle</c> = 7 units in front of the tile plane (GETBLOCKXP, CTRLSUBS.S:560),
+    /// so their x is shifted back by 7 before it is divided into blocks.
+    /// </summary>
+    public static int ColM7(int x) => BlockX(x - 7);
+
+    /// <summary>The offset 0..13 within that column (obj_xl after get_tile_div_mod_m7).</summary>
+    public static int OffsetM7(int x) => PixelX(x - 7);
+
     /// <summary>Y of the bottom of block row <paramref name="row"/> (row -1..3).</summary>
     public static int BlockBot(int row) => ScrnBot - (2 - row) * BlockHeight;
 

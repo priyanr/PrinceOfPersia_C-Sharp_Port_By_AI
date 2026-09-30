@@ -1,5 +1,76 @@
 # Changelog
 
+## 2026-09-30 — Kid control, physics and collision ported from SDLPoP; demo-verified
+
+The kid's x position, anchoring, foot column and wall contact were each wrong in small
+ways, because `KidControl`/`Physics` were hand-written approximations. They are replaced
+by `Sim/KidEngine*.cs`, a routine-by-routine port of SDLPoP (seg002/004/005/006) using the
+tables from PRINCE.EXE:
+
+- **Position and drawing:** x is the character's front edge. The column under his weight
+  comes from the frame's foot offset (determine_col). The sprite is placed with
+  load_frame_to_obj (`2*(x+dx)-116`, scaled 320/280). The level start is block edge + 14,
+  with the kid turning into the start direction (level 1 falls in, facing right, and lands
+  under the first torch).
+- **Walls:** collision edges from the sprite's width (set_char_collision), wall edges per
+  tile type, bumps detected as edges crossed since last frame (check_collisions /
+  check_bumped), soft and hard bumps, bump-falls, gates pushing the kid, and pushing a
+  kid out of a wall (in_wall). Beyond the level's edge is wall.
+- **Moves:** careful steps now walk exactly up to the edge or wall (stepfwd 1..14, then
+  test-foot, then off the edge). Starting a run next to a wall takes a step instead. Jumping
+  up aligns with the ledge (jumphang Med/Long, jump back under a ledge above). Running
+  jumps align the take-off with the edge. Down steps off an edge in front or climbs down
+  one behind. Climbing up is blocked by mirrors, chompers and low gates.
+- **Falls:** grabbing a ledge while falling with Shift held (check_grab, FALLON).
+  Start-fall picks the sequence and bumps out of walls. Landing picks soft, medium or
+  crushed from the fall speed.
+- **Controls:** keys latch as in the original, so a held key doesn't repeat a move.
+- **Rooms:** the room changes when the sprite's edge leaves the screen (leave_room), not
+  when x crosses it. Dropping out of the level's bottom kills.
+- **Exit:** press Up at the open exit door to climb the stairs (was: standing on it).
+- `check_press` and loose floors look across room edges.
+- Headless: `POP_DEMO=1 POPGame --dump out 0 ".150"` replays the attract-mode demo. It
+  matches a DOSBox recording of the original pixel for pixel on the kid.
+
+## 2026-09-29 — Sequences read from the unpacked EXE; plates only pressed underfoot
+
+**Garbled sequences.** `DosTables` read the frame and sequence tables straight out of the
+PRINCE.EXE file, but the file is EXEPACK-compressed. Medland's 29 x frame 109 came out as
+the garbage frames 218, 7, 178, 0, 176, and every sequence after it (hardland, bump,
+bumpfall, the fighting sequences) was read 22 bytes off. The tables now come from
+`ExePack.Unpack` (frames `0x1BCC5`, bytecode `0x1ACE0`, index `0x1C568`). `Validate()`
+checks medland's 109 run. The level 1 start now plays 108, holds 109, then 110-119.
+
+**Door opening while the kid falls into the pit** (reported playing level 1 room 6). A
+standing jump that came up short dropped the kid into the gap. While falling, the kid drifted over the
+pressure plate beside it, and `Hazards` pressed the tile under the kid on every tick, so the
+door opened mid-fall. The press is now a port of CHECKPRESS (CTRL.S:1939):
+- only stand, runjump, turn or bumped, and only on frames with `fcheckmark`;
+- hanging and climbing frames press the tile above;
+- frame 79 (jumping up to touch the ceiling) breaks a loose floor above;
+- only opener (15) and closer (6) plates count, not the already-down plate (5).
+
+Whether that short jump should fall at all still depends on the foot column (PENDING).
+
+## 2026-09-29 — Jumps clear gaps: the floor check follows the frame's `fcheckmark`
+
+Every standing or running jump over a hole used to drop the kid into it. `Physics`
+checked for floor under the kid on every tick while standing, running or jumping, so the
+first airborne frame over the gap started a fall. The original's ONGROUND (CTRL.S:309)
+tests only frames whose flags carry `fcheckmark` (0x40). The airborne frames of standjump
+(20-25) and runjump (39-43) don't have it, so the kid sails over the gap. Found by
+recording DOSBox while the user jumped the hole in level 1 room 6.
+
+- `Physics.CheckFloor` now follows CHECKFLOOR's per-action branching: hanging never
+  checks, and a bumped character checks only on frame 109 (crouched) or 185 (dead).
+- `StartFall` picks the fall sequence from the frame the kid dropped out of, as STARTFALL
+  does: stepfall, stepfall2, jumpfall, rjumpfall, hangdrop (+5 x) and fightfall.
+  Previously every fall was stepfall.
+- Headless test hook: `POP_START=room,block,face` starts `--dump` with the kid standing
+  anywhere, e.g. `POP_START=6,4,-1 POPGame --dump out 1 ".2 LU2 .30"`.
+- Not ported yet: FALLON (grabbing a ledge while falling, InMidair frames 102-105), and
+  STARTFALL's bump-out checks after the first frame of a fall.
+
 ## 2026-09-25 — Correction: the Codex model was not GPT-5.6
 
 The March 2026 Codex session was recorded as "GPT 5.6 terra". GPT-5.6 was only released

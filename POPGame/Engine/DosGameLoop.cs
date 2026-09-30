@@ -92,7 +92,7 @@ public sealed class DosGameLoop
                         6, 6, 20, Color.Red);
         Raylib.DrawText("arrows move/jump/crouch   shift = careful step   R = restart level",
                         6, DosRenderer.ScreenH * Scale - 26, 16, Color.DarkGray);
-        Raylib.DrawText($"x{k.X} y{k.Y} row{k.Row} frame{k.Frame} act{(int)k.Action} seq{k.CurrentSeq}",
+        Raylib.DrawText($"x{k.X} y{k.Y} row{k.Row} col{k.Col} frame{k.Frame} act{(int)k.Action} seq{k.CurrentSeq}",
                         6, 30, 14, Color.DarkGray);
     }
 }
@@ -108,6 +108,10 @@ public static class GameSetup
             throw new InvalidDataException($"PRINCE.EXE table check failed: {problem}");
 
         levels = DosLevels.Load();
-        return new Simulation(tables, levels.Get(level), level);
+
+        // Collision uses the width of the kid's sprite, as set_char_collision does.
+        var kid = new DosImageBank(DosGame.File("KID.DAT"), 400);
+        return new Simulation(tables, levels.Get(level), level,
+            f => kid[f.Image + 1] is { } img ? (img.Width, img.Height) : (0, 0));
     }
 }

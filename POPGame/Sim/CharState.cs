@@ -39,15 +39,15 @@ public static class Seq
 }
 
 /// <summary>
-/// Runtime state of one animated character. Mirrors the Char* variables in the
-/// original (EQ.S): position, facing, the current sequence-table cursor, and the
-/// fall velocities the <c>setfall</c> opcode seeds.
+/// Runtime state of one animated character. Mirrors SDLPoP's <c>char_type</c> (the
+/// original's Char* variables, EQ.S): position, facing, the sequence-table cursor, and
+/// the fall velocities the <c>setfall</c> opcode seeds.
 /// </summary>
 public sealed class CharState
 {
-    public int Room = 1;              // 1-indexed screen
-    public int X;                     // x units; see Coord
-    public int Y;                     // pixels
+    public int Room = 1;              // 1-indexed screen; 0 = fell out of the level
+    public int X;                     // x units (Char.x); see Coord
+    public int Y;                     // pixels (Char.y): the character's floor line
     public sbyte Face = -1;           // -1 = left (sprites are drawn facing left), 0 = right
 
     public int Frame = 15;            // current frame number, 1..240
@@ -56,8 +56,8 @@ public sealed class CharState
     public int SeqPtr;                // cursor into the sequence bytecode
     public int CurrentSeq;            // sequence id, for debugging / decisions
 
-    public int XVel, YVel;            // fall velocities, seeded by 'setfall'
-    public int FallCount;             // frames spent falling, for landing damage
+    public int FallX, FallY;          // Char.fall_x / fall_y, seeded by 'setfall'
+    public int Repeat;                // Char.repeat: safe_step's "second try" flag
 
     public int Hp = 3, MaxHp = 3;
     public bool Alive = true;
@@ -67,17 +67,25 @@ public sealed class CharState
     public int FaceSign => Face < 0 ? -1 : 1;
 
     /// <summary>
-    /// The block row the character logically occupies. Kept as its own field, not
-    /// derived from Y, because the sequence table's up/down opcodes move it
-    /// independently while a climb or a fall is in progress (ANIMCHAR in COLL.S).
+    /// Char.curr_row: the block row the character occupies. Kept as its own field, not
+    /// derived from Y, because the sequence table's up/down opcodes and the fall code
+    /// move it independently of the pixel position.
     /// </summary>
     public int Row;
 
-    public int BlockX => Coord.BlockX(X);
-    public int RowFromY => Coord.BlockY(Y);
+    /// <summary>
+    /// Char.curr_col: the column under the character's weight, set by determine_col
+    /// from the frame's foot offset (see <see cref="KidEngine"/>). It is not derived
+    /// from X on the fly, because the original only refreshes it at fixed points in
+    /// the frame and the stale value matters.
+    /// </summary>
+    public int Col;
+
+    /// <summary>char_dx_forward: X moved by <paramref name="dx"/> in the facing direction.</summary>
+    public int DxForward(int dx) => X + (Face < 0 ? -dx : dx);
 
     /// <summary>Applies a delta in the direction the character faces (ADDCHARX in CTRLSUBS.S).</summary>
-    public void AddX(int dx) => X += Face < 0 ? -dx : dx;
+    public void AddX(int dx) => X = DxForward(dx);
 
-    public void Flip() => Face = (sbyte)(Face < 0 ? 0 : -1);
+    public void Flip() => Face = (sbyte)~Face;
 }

@@ -57,7 +57,7 @@ public sealed class DosRenderer
 
         var kid = sim.Kid;
         if (kid.Room >= 1 && kid.Room <= Level.NumScreens)
-            _drawer.Build(sim.Level, kid.Room, kid.Room, kid.Row, kid.BlockX, _tick);
+            _drawer.Build(sim.Level, kid.Room, kid.Room, kid.Row, kid.Col, _tick);
         else
         {
             _drawer.Back.Clear();
@@ -127,20 +127,13 @@ public sealed class DosRenderer
         var img = _kid[f.Image + 1];        // frame images are 0-based, banks 1-based
         if (img is null) return;
 
-        // dx is in world units and applies in the facing direction; dy is in pixels.
-        int px = ToPx(ch.X + (ch.Face < 0 ? -f.Dx : f.Dx));
+        // load_frame_to_obj + draw_mid (SDLPoP seg008): obj_x is in the original's
+        // 280-wide space and scales to 320. Facing left the sprite's left edge is at
+        // obj_x; facing right the sprite is mirrored and its right edge is there.
+        // Vertically y names the image's bottom row.
+        int px = KidEngine.SpriteX(ch, f) * 320 / 280;
+        if (ch.FacingRight) px -= img.Width;
         int py = ch.Y + f.Dy;
-
-        // Horizontally the sprite is centred on the character. The original anchors it
-        // by its front edge (LOAD_FRAME_TO_OBJ: obj_x = 2x - 116, scaled 320/280, left
-        // edge when facing left, right edge when facing right), but that only lines up
-        // once the simulation's x means the same point on the kid as the original's —
-        // a constant offset matched the original facing left and sank him into walls
-        // facing right. Until the sim's x convention is ported, centring is the
-        // placement that agrees with our own collision.
-        //
-        // Vertically, like every blit in the original, y names the image's bottom row
-        // (checked against a DOSBox capture).
-        Frame.Blit(img, _kid.Palette, px - img.Width / 2, py - img.Height + 1, ch.FacingRight);
+        Frame.Blit(img, _kid.Palette, px, py - img.Height + 1, ch.FacingRight);
     }
 }

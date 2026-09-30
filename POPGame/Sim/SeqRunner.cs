@@ -81,8 +81,8 @@ public sealed class SeqRunner
                     continue;
 
                 case SeqOp.SetFall:
-                    ch.XVel = (sbyte)seq[ch.SeqPtr++];
-                    ch.YVel = (sbyte)seq[ch.SeqPtr++];
+                    ch.FallX = (sbyte)seq[ch.SeqPtr++];
+                    ch.FallY = (sbyte)seq[ch.SeqPtr++];
                     continue;
 
                 case SeqOp.IfWtLess:

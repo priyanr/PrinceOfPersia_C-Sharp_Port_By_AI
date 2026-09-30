@@ -6,36 +6,37 @@ namespace POPGame.Sim;
 
 /// <summary>
 /// Owns one level's simulation: the level data, the kid, and the per-tick order of
-/// operations the original uses — control decides the sequence, the sequence poses
-/// and moves the character, then physics resolves the world against it.
+/// operations the original uses (play_frame / play_kid_frame in SDLPoP) — control
+/// decides the sequence, the sequence poses and moves the character, then collisions,
+/// the floor, pressure plates and the room exit are resolved against it.
 /// </summary>
 public sealed class Simulation
 {
     public DosTables Tables { get; }
     public Level Level { get; private set; }
-    public RoomView View { get; private set; }
+    public RoomView View { get; private set; } = null!;
     public CharState Kid { get; } = new();
     public SeqEffects Effects { get; } = new();
     public int LevelNumber { get; private set; }
 
     private readonly SeqRunner _seq;
-    private KidControl _control;
-    private Physics _physics;
+    private readonly Func<FrameDef, (int W, int H)> _kidImageSize;
+    private KidEngine _engine = null!;
     private Hazards _hazards = null!;
 
-    public Simulation(DosTables tables, Level level, int levelNumber)
+    /// <param name="kidImageSize">
+    /// Width and height of a frame's kid sprite (KID.DAT). Collision uses the sprite's
+    /// width, as the original's set_char_collision does.
+    /// </param>
+    public Simulation(DosTables tables, Level level, int levelNumber,
+                      Func<FrameDef, (int W, int H)> kidImageSize)
     {
         Tables = tables;
         _seq = new SeqRunner(tables);
+        _kidImageSize = kidImageSize;
         Level = level;
         LevelNumber = levelNumber;
-        View = new RoomView(level);
-        _control = new KidControl(_seq, View);
-        _physics = new Physics(View, _seq);
-        _hazards = new Hazards(level);
-
-        ResetKid();
-        StartEvents();
+        Setup();
     }
 
     public void LoadLevel(Level level, int levelNumber)
@@ -44,55 +45,52 @@ public sealed class Simulation
         level.Reset();
         Level = level;
         LevelNumber = levelNumber;
-        View = new RoomView(level);
-        _control = new KidControl(_seq, View);
-        _physics = new Physics(View, _seq);
-        _hazards = new Hazards(level);
-        ResetKid();
-        StartEvents();
+        Setup();
+    }
+
+    private void Setup()
+    {
+        View = new RoomView(Level);
+        _hazards = new Hazards(Level);
+        _engine = new KidEngine(_seq, Tables, View, _kidImageSize, () => _hazards.ExitOpen)
+        {
+            StartRoom = Level.KidStartScrn,
+        };
+        StartPos(Level.KidStartScrn, Level.KidStartBlock, Level.KidStartFace == 0xFF ? -1 : 0,
+                 fallingEntry: LevelNumber == 1);
     }
 
     /// <summary>
-    /// DO_STARTPOS's special case for level 1: the kid falls in and the closer in room 5
-    /// (row 0, col 2) is pressed, so the open gate beside the first room slams shut.
+    /// Puts the kid at a block the way the level start does (DO_STARTPOS): he starts
+    /// facing away from <paramref name="face"/> and turns to it. The headless test hook
+    /// uses this to start anywhere.
     /// </summary>
-    private void StartEvents()
+    public void PlaceKid(int room, int block, int face) => StartPos(room, block, face, fallingEntry: false);
+
+    private void StartPos(int room, int block, int face, bool fallingEntry)
     {
-        if (LevelNumber == 1) _hazards.PressButton(5, 0, 2);
-    }
-
-    private void ResetKid()
-    {
-        int block = Level.KidStartBlock;
-        Kid.Room = Level.KidStartScrn;
-        Kid.Row = block / Coord.Cols;
-        int col = block % Coord.Cols;
-
-        // Start in the middle of the starting block, standing on its floor.
-        Kid.X = Coord.BlockEdge(col) + Coord.BlockWidth / 2;
-        Kid.Y = Coord.FloorY(Kid.Row);
-        Kid.Face = (sbyte)(Level.KidStartFace == 0xFF ? -1 : 0);
-
-        Kid.Hp = Kid.MaxHp;
-        Kid.Alive = true;
-        Kid.XVel = Kid.YVel = 0;
-        Kid.FallCount = 0;
-
-        _seq.Start(Kid, Seq.Stand);
-        Kid.Frame = 15;
-        Kid.Action = CharAction.Stand;
+        Effects.Clear();
+        // Level 1's special entry: the closer in room 5 (row 0, col 2) is pressed so
+        // the gate beside the first room, authored open, slams shut as the kid drops in.
+        if (fallingEntry) _hazards.PressButton(5, 0, 2);
+        _engine.StartPos(Kid, Effects, room, block, face, fallingEntry);
     }
 
     public void Tick(InputState input)
     {
         Effects.Clear();
 
-        _control.Update(Kid, input);
-        _seq.Animate(Kid, Effects);
-        _physics.Update(Kid, Effects);
-        _hazards.Tick(Kid, Effects);
-        if (_hazards.LevelComplete) Effects.NextLevel = true;
+        _engine.PlayKidFrame(Kid, input, Effects);
+        _hazards.Tick(Kid, KidFrame, Effects);
+        _engine.ExitRoom(Kid);
     }
 
-    public FrameDef KidFrame => Tables.Frames[Kid.Frame];
+    /// <summary>Drive the kid from level 0's demo move table (see <see cref="KidEngine.DemoMode"/>).</summary>
+    public bool DemoMode
+    {
+        get => _engine.DemoMode;
+        set => _engine.DemoMode = value;
+    }
+
+    public FrameDef KidFrame => Tables.Frames[Math.Clamp(Kid.Frame, 0, DosTables.FrameCount)];
 }
