@@ -16,7 +16,7 @@ overlaps on top of him (seg008 redraw_needed_tiles), and we didn't.
   redraw_at_char2 after it cover him. The marks and the clip come from
   `KidEngine.KidDraw` (add_kid_to_objtable).
 - `floor_left_overlay` is SDLPoP's table; not yet located in PRINCE.EXE.
-- Not compared with DOSBox (no DOS files in this session).
+- Confirmed fixed by the user in the live game; not yet compared with DOSBox frame by frame.
 
 ## 2026-09-30 (later) — Spikes, chompers, palace graphics, sprite clipping, death wait
 
