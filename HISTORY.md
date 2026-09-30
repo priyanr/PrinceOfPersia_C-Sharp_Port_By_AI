@@ -137,6 +137,28 @@ Findings from the port:
 - **The exit needs Up** at the open door (up_pressed → stairs sequence 70, whose
   `nextlevel` opcode ends the level), and never in the level's start room.
 
+## Animated tiles and falling floors are a port of seg007 (2026-09-30)
+`Sim/Hazards.cs` ports SDLPoP's trobs (process_trobs / animate_*: buttons, gates, exit
+door, loose floors, spikes) and mobs (do_mobs / move_loose / loose_land). It replaces a
+hand-written version with its own gate speed, loose-floor timer and gate height / 4.
+Findings:
+- **Modifiers need load_alter_mod** at level load (`DosLevels.AlterModsAllrm`): gate
+  1 -> 188 else 0, loose -> 0, potion `<<= 3`. Without the shift no potion was drawn
+  (the drawer reads the type from bits 3-7).
+- **The exit door opens gradually** (+1 a tick to 43) and `leveldoor_open` is set only
+  at the top; the start room's door is set to 43 and slammed shut (find_start_level_door).
+- **A loose floor falls as a mob** after counting 1..11 under the kid's weight
+  (make_loose_fall(1) from check_press). Its modifier's bit 7 means "shaking" (a knock
+  from a landing or a bump, 0x80..0x83, via the sequences' jarU/jarD). Tile bit 0x20
+  marks a loose floor that never falls. The demo's two loose floors in room 2 fall in
+  DOSBox exactly as ours do.
+- **Optional graphics** (load_more_opt_graf, seg000): after loading the environment
+  chtab, the original loads eight index ranges again from resource 1200 + index. In
+  VDUNGEON those are the only copies of the big pillars (86-91), spikes (127-143),
+  chompers (101-123), debris (30-31), etc., so ours drew nothing for them. This was the
+  "black floor" in level 2's first room and the demo's missing dotted piece.
+- **Right Shift** is an action key in the DOS game; the live loop only read Left Shift.
+
 ## Movement rules found in the source
 - **Sequences chain themselves** through `goto`s in the bytecode, so control only picks an
   entry point: jumphangMed(8) -> hang(9) -> hangdrop(11)/climbup(10) -> stand(2);

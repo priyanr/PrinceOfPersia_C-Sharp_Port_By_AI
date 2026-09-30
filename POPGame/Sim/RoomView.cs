@@ -32,12 +32,6 @@ public sealed class RoomView
         _ => true,
     };
 
-    /// <summary>
-    /// A gate's BLUESPEC is its height, 0 (shut) to 47 (fully raised): the original's
-    /// modifier (0..188) divided by 4.
-    /// </summary>
-    public const int GateOpen = 47;
-
     /// <summary>BLUESPEC value at which a slicer's blade is out (MOVEDATA.S).</summary>
     public const int SlicerExtended = 2;
 }

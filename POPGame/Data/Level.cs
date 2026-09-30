@@ -20,7 +20,8 @@ public class Level
     public byte[] LiveBlueSpec = new byte[NumScreens * CellsPerScreen];
 
     public byte[] LinkLoc  = new byte[256];
-    public byte[] LinkMap  = new byte[256];
+    public byte[] LinkMap  = new byte[256];   // live: bits 0-4 are the plate timers
+    private readonly byte[] _linkMapOriginal = new byte[256];
 
     // MAP[screen0, dir]: dir 0=left 1=right 2=above 3=below; 1-indexed; 0=none
     public byte[,] Map     = new byte[NumScreens, 4];
@@ -128,6 +129,7 @@ public class Level
         // Initialise live copies from original data
         Buffer.BlockCopy(lv.BlueType, 0, lv.LiveBlueType, 0, lv.BlueType.Length);
         Buffer.BlockCopy(lv.BlueSpec, 0, lv.LiveBlueSpec, 0, lv.BlueSpec.Length);
+        Buffer.BlockCopy(lv.LinkMap, 0, lv._linkMapOriginal, 0, 256);
 
         return lv;
     }
@@ -137,5 +139,6 @@ public class Level
     {
         Buffer.BlockCopy(BlueType, 0, LiveBlueType, 0, BlueType.Length);
         Buffer.BlockCopy(BlueSpec, 0, LiveBlueSpec, 0, BlueSpec.Length);
+        Buffer.BlockCopy(_linkMapOriginal, 0, LinkMap, 0, 256);   // plate timers
     }
 }

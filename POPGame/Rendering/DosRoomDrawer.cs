@@ -138,17 +138,15 @@ public sealed class DosRoomDrawer
     private int RawTile(int room, int row, int col) => (int)_level.GetTileId(room - 1, row, col);
 
     /// <summary>
-    /// The modifier a tile is drawn with — BLUESPEC as the original rewrites it when a
-    /// room is loaded (LOAD_ALTER_MOD). Our simulation keeps a gate's height in 0..47
-    /// where the original keeps 0..188, and walls get their neighbour bits here.
+    /// The modifier a tile is drawn with. BLUESPEC is already in the original's units
+    /// (load_alter_mod runs at level load, <see cref="Dos.DosLevels"/>); walls get their
+    /// neighbour bits here, and torches animate from the tick.
     /// </summary>
     private int AlteredMod(int room, int row, int col)
     {
         int spec = _level.GetSpec(room - 1, row, col);
         switch (RawTile(room, row, col))
         {
-            case Gate: return Math.Min(spec, RoomView.GateOpen) * 4;
-            case Loose: return 0;
             case Torch: case TorchWithDebris: return 0;
             case Wall:
             {

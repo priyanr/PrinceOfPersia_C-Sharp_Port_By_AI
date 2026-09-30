@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-09-30 — Animated tiles and falling floors ported (seg007); sword, potions, big pillars
+
+`Sim/Hazards.cs` was a hand-written approximation (its own gate speeds, loose-floor timer
+and a gate height stored divided by 4). It is replaced by a port of SDLPoP seg007:
+animated tiles ("trobs") and falling floor pieces ("mobs"), with modifiers in the
+original units.
+
+- **Loose floors** shake when something lands or knocks nearby (check_knock / do_knock),
+  and one being stood on comes away after 11 ticks and **falls** as a piece, room by room.
+  It shatters into rubble, knocks loose floors it hits on the way down, presses plates it
+  lands on, and hurts or knocks down a kid it lands on (fell_on_your_head). The demo's
+  loose floors fall exactly where they do in DOSBox.
+- **Exit door**: an opener raises it one step a tick (animate_leveldoor). The kid can
+  only go up the stairs once it is fully open (was: as soon as the plate was pressed,
+  with the door never drawn open). The start room's door starts open and slams shut.
+- **Gates** open, hold and close as in animate_door; closers slam them in six speeds.
+  Plates stay down 5 ticks after the last press, and a dead kid on a plate jams it
+  (died_on_button).
+- **Sword and potions**: Shift with the item in front (standing or crouched) crouches
+  and picks it up (check_get_item / get_item / proc_get_object). The sword sets
+  `HasSword`. Potions heal, add a hit point, hurt, slow the fall (feather) or flip the
+  screen. Pickups flash the background, and so does losing a hit point.
+- **Potions are drawn** (their type is now shifted into bits 3-7 at level load, as
+  load_alter_mod does; before, none showed).
+- **Big pillars, spikes, chompers, and the dotted floor piece in the demo** are drawn.
+  The original loads those images from VDUNGEON resource `1200 + index`
+  (load_more_opt_graf), not `200 + index`, so they were missing. Level 2's first room
+  was the visible case.
+- **Spikes spring out** when the kid is over them or above them (check_spike_below).
+  They don't hurt yet.
+- **Right Shift** now works as the action key (only Left Shift and Space did).
+- `Level.Reset` also restores the plate timers.
+- Tick order is now play_frame's: falling pieces, animated tiles, then the kid (whose
+  frame ends with check_press, check_spike_below, check_knock), then the room exit.
+- Demo check: the kid's trace is unchanged over 150 ticks. Pixels differing from the
+  DOSBox recording dropped from ~1200 to ~110 per frame in room 1 and from ~2400 to
+  ~1500 in room 2 (mostly one tile, see PENDING.md).
+
 ## 2026-09-30 — Kid control, physics and collision ported from SDLPoP; demo-verified
 
 The kid's x position, anchoring, foot column and wall contact were each wrong in small

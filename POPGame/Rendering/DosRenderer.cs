@@ -27,6 +27,7 @@ public sealed class DosRenderer
     private readonly DosImageBank _env;
     private readonly DosImageBank _flame;
     private readonly DosRoomDrawer _drawer;
+    private readonly DosDrawTables _tables;
 
     /// <summary>
     /// The room drawer works in the original's screen coordinates. Captures of the real
@@ -44,7 +45,8 @@ public sealed class DosRenderer
         _kid = new DosImageBank(DosGame.File("KID.DAT"), 400);
         _env = new DosImageBank(DosGame.File("VDUNGEON.DAT"), 200, 360);
         _flame = new DosImageBank(DosGame.File("PRINCE.DAT"), 150);
-        _drawer = new DosRoomDrawer(DosDrawTables.Load());
+        _tables = DosDrawTables.Load();
+        _drawer = new DosRoomDrawer(_tables);
     }
 
     /// <summary>World x units -> screen pixels.</summary>
@@ -65,8 +67,111 @@ public sealed class DosRenderer
         }
 
         DrawOps(_drawer.Back);
-        DrawKid(sim);
+        DrawMid(sim);
         DrawOps(_drawer.Fore);
+
+        if (sim.Flash != 0) Flash(sim.Flash);
+        if (sim.UpsideDown) FlipGameplay();
+    }
+
+    /// <summary>
+    /// The objects between the back and front layers: the kid and any falling
+    /// floor pieces, in the original's order (compare_curr_objs: lower y first, but
+    /// pieces among themselves the other way round).
+    /// </summary>
+    private void DrawMid(Simulation sim)
+    {
+        var objs = new List<(int Y, bool IsMob, Action Draw)>();
+        int room = sim.Kid.Room;
+        if (room >= 1 && room <= Level.NumScreens)
+        {
+            int above = sim.Level.Above(room), below = sim.Level.Below(room);
+            foreach (var mob in sim.Hazards.Mobs)
+            {
+                if (MobY(mob, room, above, below) is not { } y) continue;
+                int xh = mob.Xh;
+                objs.Add((y, true, () => DrawMob(xh, y)));
+            }
+        }
+        var f = sim.KidFrame;
+        objs.Add((sim.Kid.Y + f.Dy, false, () => DrawKid(sim)));
+
+        // A stable bubble sort, as the original does it.
+        for (bool swapped = true; swapped;)
+        {
+            swapped = false;
+            for (int i = 0; i < objs.Count - 1; i++)
+            {
+                var (a, b) = (objs[i], objs[i + 1]);
+                bool swap = a.IsMob && b.IsMob ? a.Y < b.Y : a.Y > b.Y;
+                if (!swap) continue;
+                (objs[i], objs[i + 1]) = (b, a);
+                swapped = true;
+            }
+        }
+        foreach (var o in objs) o.Draw();
+    }
+
+    /// <summary>draw_mob: where a falling piece shows in the drawn room, if it does.</summary>
+    private static int? MobY(Hazards.Mob mob, int drawn, int roomA, int roomB)
+    {
+        if (mob.Room == drawn) return mob.Y >= 210 ? null : mob.Y;
+        if (mob.Room == roomB && roomB != 0)
+            return Math.Abs((int)(sbyte)(byte)mob.Y) >= 18 ? null : mob.Y + 192;
+        if (mob.Room == roomA && roomA != 0)
+            return mob.Y < 174 ? null : mob.Y - 189;
+        return null;
+    }
+
+    /// <summary>
+    /// draw_objtable_item, loose floor: the falling board is the loose floor's frame 10
+    /// in three parts, left, bottom and right.
+    /// </summary>
+    private void DrawMob(int xh, int y)
+    {
+        const int Frame = 10;
+        var ops = new List<DosRoomDrawer.Op>
+        {
+            new(DosRoomDrawer.Set.Env, _tables.LooseLeft[Frame], xh * 8, y - 3, BlitMode.Trans),
+            new(DosRoomDrawer.Set.Env, _tables.LooseBottom[Frame], xh * 8, y, BlitMode.NoTrans),
+            new(DosRoomDrawer.Set.Env, _tables.LooseRight[Frame], (xh + 4) * 8, y - 1, BlitMode.Trans),
+        };
+        DrawOps(ops);
+    }
+
+    // The VGA colours a pickup flashes the background with (flash_color).
+    private static readonly (byte R, byte G, byte B)[] FlashColors =
+    [
+        (0, 0, 0), (0, 0, 170), (0, 170, 0), (0, 170, 170), (170, 0, 0), (170, 0, 170),
+        (170, 85, 0), (170, 170, 170), (85, 85, 85), (85, 85, 255), (85, 255, 85),
+        (85, 255, 255), (255, 85, 85), (255, 85, 255), (255, 255, 85), (255, 255, 255),
+    ];
+
+    /// <summary>do_flash: the background colour (black) becomes the flash colour for the tick.</summary>
+    private void Flash(int color)
+    {
+        var (r, g, b) = FlashColors[color & 15];
+        var px = Frame.Pixels;
+        for (int i = 0; i < px.Length; i += 4)
+        {
+            if (px[i] != 0 || px[i + 1] != 0 || px[i + 2] != 0) continue;
+            px[i] = r; px[i + 1] = g; px[i + 2] = b;
+        }
+    }
+
+    /// <summary>upside_down: the 192-row play area is shown mirrored top to bottom.</summary>
+    private void FlipGameplay()
+    {
+        const int Rows = 192;
+        int stride = Frame.Width * 4;
+        var px = Frame.Pixels;
+        var tmp = new byte[stride];
+        for (int top = 0, bot = Rows - 1; top < bot; top++, bot--)
+        {
+            Buffer.BlockCopy(px, top * stride, tmp, 0, stride);
+            Buffer.BlockCopy(px, bot * stride, px, top * stride, stride);
+            Buffer.BlockCopy(tmp, 0, px, bot * stride, stride);
+        }
     }
 
     private void DrawOps(List<DosRoomDrawer.Op> ops)
@@ -84,7 +189,7 @@ public sealed class DosRenderer
             {
                 DosRoomDrawer.Set.Flame => 150 + op.Id,
                 DosRoomDrawer.Set.Wall => 360 + op.Id,
-                _ => 200 + op.Id,
+                _ => EnvId(op.Id),
             };
             var bank = op.Set == DosRoomDrawer.Set.Flame ? _flame : _env;
             var img = bank.ById(id);
@@ -94,6 +199,22 @@ public sealed class DosRenderer
             Frame.Blit(img, bank.PaletteForId(id), op.X, y, mirror: false,
                        mode: op.Mode, monoColor: op.Mono);
         }
+    }
+
+    // load_more_opt_graf (SDLPoP seg000): after loading the environment chtab, the
+    // original loads these index ranges (1-based, inclusive) again from resource
+    // 1200 + index. VDUNGEON keeps the big pillars, spikes, chompers and debris only
+    // there, so without this they are simply missing.
+    private static readonly byte[] OptGrafMin = [0x01, 0x1E, 0x4B, 0x4E, 0x56, 0x65, 0x7F, 0x0A];
+    private static readonly byte[] OptGrafMax = [0x09, 0x1F, 0x4D, 0x53, 0x5B, 0x7B, 0x8F, 0x0D];
+
+    /// <summary>Resource id of environment image <paramref name="index"/> (chtab 6).</summary>
+    private int EnvId(int index)
+    {
+        for (int i = 0; i < OptGrafMin.Length; i++)
+            if (index >= OptGrafMin[i] && index <= OptGrafMax[i] && _env.ById(1200 + index) is not null)
+                return 1200 + index;
+        return 200 + index;
     }
 
     /// <summary>

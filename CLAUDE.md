@@ -43,6 +43,11 @@ Offsets are into the **unpacked** load image (`ExePack.Unpack`, no MZ header). N
 tables from the PRINCE.EXE file: EXEPACK stores byte runs as commands, which garbles them
 and shifts everything after.
 
+Tile modifiers (BLUESPEC) are in the original's units: `DosLevels` applies
+load_alter_mod at load (gate 0..188, 0xFF = open for good; potion type in bits 3-7).
+Environment images in the optgraf ranges come from VDUNGEON `1200+index`, not `200+index`
+(`DosRenderer.EnvId`).
+
 Frame flags: `0x40` = check floor (fcheckmark), `0x1F` = foot offset, `0x20` thin,
 `0x80` odd. `image == 255` = blank. Kid sprite = KID.DAT `401 + image`.
 
@@ -71,18 +76,21 @@ Dos/        DosGame, DatFile, DatImage, DosImageBank, DosTables, ExePack,
             DosDrawTables, DosLevels, PngWriter
 Sim/        Coord, CharState (+CharAction, Seq ids), SeqRunner (play_seq / ANIMCHAR),
             RoomView, KidEngine (SDLPoP port: .cs frame order/tiles/room exit,
-            .Physics.cs falls/landing/grab/wall collisions, .Control.cs controls),
-            Hazards (check_press, plates, gates, loose floors), Simulation
+            .Physics.cs falls/landing/grab/wall collisions, .Control.cs controls,
+            .Items.cs sword/potions), Hazards (seg007 port: trobs = plates, gates,
+            exit door, loose floors, spikes; mobs = falling floor pieces;
+            check_press, check_knock), Simulation
 Rendering/  Framebuffer (320x200), DosRoomDrawer (DRAW_ROOM port), DosRenderer
 Engine/     DosGameLoop (Raylib), HeadlessRun
 Data/       Level, TileId
 ```
 All drawing goes through `Framebuffer`, so live game and dumps are pixel-identical.
 
-**Per tick** (SDLPoP play_kid_frame, in `KidEngine.PlayKidFrame`): control picks a
-sequence → play_seq → fall_accel/fall_speed → set_char_collision → check_collisions /
-check_bumped / check_gate_push → check_action (floor, fall, land, grab) → `Hazards`
-(check_press) → exit_room. `KidEngine` keeps SDLPoP's routine names and shared globals
+**Per tick** (SDLPoP play_frame, in `Simulation.Tick`): `Hazards.DoMobs` →
+`ProcessTrobs` → `KidEngine.PlayKidFrame` (control picks a sequence → play_seq →
+fall_accel/fall_speed → set_char_collision → check_collisions / check_bumped /
+check_gate_push → check_action (floor, fall, land, grab) → check_press →
+check_spike_below → check_knock) → exit_room. `KidEngine` keeps SDLPoP's routine names and shared globals
 (`curr_tile2`, `tile_col`, latched controls), so each method can be checked against
 seg002/004/005/006. States are identified by **action + frame**, not action alone.
 Sequences chain themselves via `goto`, so control only chooses entry points.

@@ -6,6 +6,8 @@ public sealed partial class KidEngine
 {
     public const int FallingSpeedAccel = 3;
     public const int FallingSpeedMax = 33;
+    public const int FallingSpeedAccelFeather = 1;
+    public const int FallingSpeedMaxFeather = 4;
 
     private int _grabTimer;
     private int _fallFrame;
@@ -16,7 +18,9 @@ public sealed partial class KidEngine
     private void FallAccel()
     {
         if (_ch.Action != CharAction.InFreefall) return;
-        _ch.FallY = Math.Min(_ch.FallY + FallingSpeedAccel, FallingSpeedMax);
+        _ch.FallY = _isFeatherFall != 0
+            ? Math.Min(_ch.FallY + FallingSpeedAccelFeather, FallingSpeedMaxFeather)
+            : Math.Min(_ch.FallY + FallingSpeedAccel, FallingSpeedMax);
     }
 
     /// <summary>fall_speed.</summary>

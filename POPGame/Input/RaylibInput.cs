@@ -14,8 +14,10 @@ public class RaylibInput
         s.Right  = Raylib.IsKeyDown(KeyboardKey.Right);
         s.Up     = Raylib.IsKeyDown(KeyboardKey.Up);
         s.Down   = Raylib.IsKeyDown(KeyboardKey.Down);
+        // Either Shift, as in the DOS game.
         s.Action = Raylib.IsKeyDown(KeyboardKey.Space)
-                || Raylib.IsKeyDown(KeyboardKey.LeftShift);
+                || Raylib.IsKeyDown(KeyboardKey.LeftShift)
+                || Raylib.IsKeyDown(KeyboardKey.RightShift);
         s.Pause  = Raylib.IsKeyPressed(KeyboardKey.Escape);
 
         // Fresh-press (rising-edge) flags
@@ -24,7 +26,8 @@ public class RaylibInput
         s.FreshUp     = Raylib.IsKeyPressed(KeyboardKey.Up);
         s.FreshDown   = Raylib.IsKeyPressed(KeyboardKey.Down);
         s.FreshAction = Raylib.IsKeyPressed(KeyboardKey.Space)
-                     || Raylib.IsKeyPressed(KeyboardKey.LeftShift);
+                     || Raylib.IsKeyPressed(KeyboardKey.LeftShift)
+                     || Raylib.IsKeyPressed(KeyboardKey.RightShift);
 
         // Any key pressed this frame (for "press any key" prompts)
         s.AnyFresh = Raylib.GetKeyPressed() != 0;

@@ -1,262 +1,707 @@
 using POPGame.Data;
 using POPGame.Dos;
-using POPGame.Engine;
 
 namespace POPGame.Sim;
 
 /// <summary>
-/// Per-tick world state: gates opening and closing, pressure-plate timers, loose
-/// floors giving way, and the exit door. Level 1 needs all of these to be finishable.
+/// The level's moving parts, ported from SDLPoP seg007: animated tiles ("trobs":
+/// pressure plates, gates, the exit door, shaking loose floors) and the falling
+/// loose-floor pieces ("mobs"), plus check_press (seg006) and check_knock (seg003).
+///
+/// Modifiers (BLUESPEC) are in the original's units, as load_alter_mod leaves them:
+/// a gate's is its height 0..188 (0xFF = held open for good), the exit door's rises
+/// to 43, a loose floor's counts up to its fall. The routines keep their SDLPoP names
+/// and its shared globals (<c>trob</c>, <c>curmob</c>, <c>curr_room</c>,
+/// <c>curr_tilepos</c>, <c>curr_modifier</c>), so each one can be checked against
+/// the source. Sounds, redraw bookkeeping and the torch/potion/sword animations
+/// (cosmetic, drawn from the tick) are left out.
 /// </summary>
 public sealed class Hazards
 {
     private readonly Level _level;
     private readonly Links _links;
-
-    // Loose floors that have been stepped on: key -> ticks since triggered.
-    private readonly Dictionary<(int Screen, int Cell), int> _looseShaking = new();
+    private readonly int _levelNumber;
 
     /// <summary>
-    /// leveldoor_open: an opener has raised the exit door. The kid leaves the level by
-    /// pressing Up at it (up_pressed), which plays the stairs sequence.
+    /// fell_on_your_head (seg007): a falling piece has hit the kid. The kid engine
+    /// supplies it, since it plays his sequences.
     /// </summary>
-    public bool ExitOpen => _exitOpen;
+    public Action? LooseFellOnKid { get; set; }
 
-    public Hazards(Level level)
+    /// <summary>The kid, for check_loose_fall_on_kid and check_press.</summary>
+    public CharState? Kid { get; set; }
+
+    public Hazards(Level level, int levelNumber)
     {
         _level = level;
         _links = new Links(level);
+        _levelNumber = levelNumber;
     }
-
-    public void Tick(CharState kid, FrameDef frame, SeqEffects fx)
-    {
-        CheckPress(kid, frame);
-        TickPlates();
-        TickGates();
-        TickLoose(kid);
-    }
-
-    // ── the tile the kid is standing on ───────────────────────────────────────
 
     /// <summary>
-    /// CHECKPRESS (CTRL.S:1939): is the kid stepping on a pressure plate or a loose
-    /// floor? Hanging and climbing frames press the tile above; the on-the-ground
-    /// actions press the tile underfoot, but only on frames whose foot touches the
-    /// floor (<c>fcheckmark</c>). Midair and freefall never press anything, so a kid
-    /// falling past a plate does not trigger it.
+    /// leveldoor_open: 0 shut, 1 once an opener has raised the exit door all the way
+    /// (animate_leveldoor), 2 on Jaffar's death. The kid leaves the level by pressing
+    /// Up at an open door.
     /// </summary>
-    private void CheckPress(CharState kid, FrameDef frame)
+    public int LeveldoorOpen { get; set; }
+
+    public bool ExitOpen => LeveldoorOpen != 0;
+
+    // Level data these routines tune (SDLPoP's custom-> values for the DOS game).
+    private const int LooseFloorDelay = 11;
+    private const int LooseTilesLevel = 13;
+    private static readonly byte[] TblLevelType = [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0];
+
+    // ── room addressing (get_room_address / get_tile / get_curr_tile) ─────────
+
+    private int _currRoom, _currTilepos;
+    private int _currTile;
+    private byte _currModifier;
+
+    private static int Index(int room, int tilepos) => (room - 1) * Level.CellsPerScreen + tilepos;
+
+    private int TileAt(int room, int tilepos) => _level.LiveBlueType[Index(room, tilepos)] & 0x1F;
+    private void SetTile(int room, int tilepos, int tile) => _level.LiveBlueType[Index(room, tilepos)] = (byte)tile;
+    private byte ModAt(int room, int tilepos) => _level.LiveBlueSpec[Index(room, tilepos)];
+    private void SetMod(int room, int tilepos, byte value) => _level.LiveBlueSpec[Index(room, tilepos)] = value;
+
+    private static bool ValidRoom(int room) => room is >= 1 and <= Level.NumScreens;
+
+    /// <summary>get_curr_tile: the tile at curr_room/tilepos, loading curr_modifier.</summary>
+    private int GetCurrTile(int tilepos)
     {
-        int f = kid.Frame;
-        int row;
+        _currModifier = ModAt(_currRoom, tilepos);
+        return _currTile = TileAt(_currRoom, tilepos);
+    }
 
-        if (f is >= 87 and < 100 or >= 135 and < 141)
+    /// <summary>
+    /// get_tile (seg006): the tile at (room, col, row), following the room links.
+    /// Sets curr_room and curr_tilepos. Beyond the level's edge there is wall.
+    /// </summary>
+    private int GetTile(int room, int col, int row)
+    {
+        _currRoom = room;
+        while (true)
         {
-            row = kid.Row - 1;                              // hanging on the ledge above
+            if (col < 0) { col += Coord.Cols; if (_currRoom != 0) _currRoom = _level.Left(_currRoom); }
+            else if (col >= Coord.Cols) { col -= Coord.Cols; if (_currRoom != 0) _currRoom = _level.Right(_currRoom); }
+            else if (row < 0) { row += Coord.Rows; if (_currRoom != 0) _currRoom = _level.Above(_currRoom); }
+            else if (row >= Coord.Rows) { row -= Coord.Rows; if (_currRoom != 0) _currRoom = _level.Below(_currRoom); }
+            else break;
         }
-        else if (kid.Action is CharAction.Turn or CharAction.Bumped
-                 or CharAction.Stand or CharAction.RunJump)
-        {
-            if (f == 79)                                    // jumping up to touch the ceiling
-            {
-                if (CellAt(kid, kid.Row - 1) is { Tile: TileId.Loose } above) BreakLoose(above);
-                return;
-            }
-            if (!frame.Check) return;                       // foot isn't touching floor
-            row = kid.Row;
-        }
-        else return;
+        _currTilepos = row * Coord.Cols + col;
+        if (!ValidRoom(_currRoom)) return (int)TileId.Block;
+        return TileAt(_currRoom, _currTilepos);
+    }
 
-        if (CellAt(kid, row) is not { } cell) return;
-        switch (cell.Tile)
+    // ── trobs ─────────────────────────────────────────────────────────────────
+
+    private struct Trob
+    {
+        public int Room, Tilepos;
+        public sbyte Type;
+    }
+
+    private const int TrobsMax = 30;
+    private readonly List<Trob> _trobs = [];
+    private Trob _trob;
+
+    /// <summary>process_trobs: animate every active tile once; drop the finished ones.</summary>
+    public void ProcessTrobs()
+    {
+        if (_trobs.Count == 0) return;
+        bool needDelete = false;
+        for (int index = 0; index < _trobs.Count; index++)
+        {
+            _trob = _trobs[index];
+            AnimateTile();
+            var t = _trobs[index];
+            t.Type = _trob.Type;
+            _trobs[index] = t;
+            if (_trob.Type < 0) needDelete = true;
+        }
+        if (needDelete) _trobs.RemoveAll(t => t.Type < 0);
+    }
+
+    /// <summary>animate_tile.</summary>
+    private void AnimateTile()
+    {
+        _currRoom = _trob.Room;
+        switch ((TileId)GetCurrTile(_trob.Tilepos))
         {
             case TileId.PressPlate:
-                // Tile 6 is a CLOSER: it slams its gates shut rather than raising them.
-                PushPlate(_level.GetSpec(cell.Room - 1, cell.Row, cell.Col), close: true);
-                break;
+            case TileId.UPressPlate: AnimateButton(); break;
+            case TileId.Spikes: AnimateSpike(); break;
+            case TileId.Loose: AnimateLoose(); break;
+            case TileId.Space: AnimateEmpty(); break;
+            case TileId.Gate: AnimateDoor(); break;
+            case TileId.Exit: AnimateLeveldoor(); break;
+            default: _trob.Type = -1; break;
+        }
+        SetMod(_trob.Room, _trob.Tilepos, _currModifier);
+    }
 
-            case TileId.UPressPlate:
-                PushPlate(_level.GetSpec(cell.Room - 1, cell.Row, cell.Col), close: false);
-                break;
-
-            case TileId.Loose:
-                BreakLoose(cell);
-                break;
+    /// <summary>add_trob: start animating a tile, or change how an animating one moves.</summary>
+    private void AddTrob(int room, int tilepos, int type)
+    {
+        _trob = new Trob { Room = room, Tilepos = tilepos, Type = (sbyte)type };
+        int found = _trobs.FindIndex(t => t.Tilepos == tilepos && t.Room == room);
+        if (found == -1)
+        {
+            if (_trobs.Count >= TrobsMax) return;
+            _trobs.Add(_trob);
+        }
+        else
+        {
+            var t = _trobs[found];
+            t.Type = _trob.Type;
+            _trobs[found] = t;
         }
     }
 
-    private readonly record struct Cell(int Room, int Row, int Col, TileId Tile);
-
-    /// <summary>
-    /// The tile in the kid's column and <paramref name="row"/>, following the MAP links
-    /// when that is outside his room (get_tile). Null beyond the edge of the level.
-    /// </summary>
-    private Cell? CellAt(CharState kid, int row)
+    /// <summary>start_anim_spike: spikes still in spring out; ones going back in come out again.</summary>
+    public void StartAnimSpike(int room, int tilepos)
     {
-        int room = kid.Room, col = kid.Col;
-        while (room != 0)
+        if (!ValidRoom(room)) return;
+        sbyte oldModifier = (sbyte)ModAt(room, tilepos);
+        if (oldModifier > 0) return;
+        if (oldModifier == 0) AddTrob(room, tilepos, 1);
+        else if (oldModifier != -1) SetMod(room, tilepos, 0x8F);   // 0xFF: disabled
+    }
+
+    /// <summary>animate_spike: out, hold, back in. (Spikes don't hurt yet.)</summary>
+    private void AnimateSpike()
+    {
+        if (_trob.Type < 0) return;
+        if (_currModifier == 0xFF) return;          // disabled spike
+        if ((_currModifier & 0x80) != 0)
         {
-            if (col < 0) { col += Coord.Cols; room = _level.Left(room); }
-            else if (col >= Coord.Cols) { col -= Coord.Cols; room = _level.Right(room); }
-            else if (row < 0) { row += Coord.Rows; room = _level.Above(room); }
-            else if (row >= Coord.Rows) { row -= Coord.Rows; room = _level.Below(room); }
-            else return new Cell(room, row, col, _level.GetTileId(room - 1, row, col));
+            --_currModifier;
+            if ((_currModifier & 0x7F) != 0) return;
+            _currModifier = 6;
         }
-        return null;
-    }
-
-    private void BreakLoose(Cell cell) =>
-        _looseShaking.TryAdd((cell.Room, cell.Row * Coord.Cols + cell.Col), 0);
-
-    /// <summary>
-    /// PUSHPP (MOVER.S:425): hold the plate down for pptimer ticks, and trigger
-    /// everything on its link chain. A timer of 31 means permanently held.
-    /// </summary>
-    private void PushPlate(int linkIndex, bool close)
-    {
-        if (linkIndex is < 0 or > 255) return;
-
-        if (_links.Timer(linkIndex) != 31)
-            _links.SetTimer(linkIndex, Constants.PPTimer);
-
-        foreach (var t in _links.Chain(linkIndex))
-            Trigger(t.Screen, t.Cell, close);
-
-        _activePlates.Add(linkIndex);
-    }
-
-    private readonly HashSet<int> _activePlates = [];
-    private bool _exitOpen;
-
-    /// <summary>
-    /// Presses the button at a cell as if the kid had stepped on it. Level 1 uses this
-    /// at the start: the original presses the closer in room 5 as the kid drops in, so
-    /// the gate by the first room — authored open — slams shut (DO_STARTPOS).
-    /// </summary>
-    public void PressButton(int room, int row, int col)
-    {
-        var tile = _level.GetTileId(room - 1, row, col);
-        if (tile is not (TileId.PressPlate or TileId.UPressPlate or TileId.DPressPlate)) return;
-        PushPlate(_level.GetSpec(room - 1, row, col), close: tile == TileId.PressPlate);
-    }
-
-    private void Trigger(int screen, int cell, bool close)
-    {
-        if (screen < 1 || screen > Level.NumScreens) return;
-        if (cell is < 0 or >= Level.CellsPerScreen) return;
-
-        int s0 = screen - 1;
-        int row = cell / Coord.Cols, col = cell % Coord.Cols;
-
-        switch (_level.GetTileId(s0, row, col))
+        else
         {
-            case TileId.Gate:
-                if (close)
-                {
-                    _gateHold.Remove((screen, cell));
-                    _gateClosing.Remove((screen, cell));
-                    _gateSlamming.Add((screen, cell));
-                }
-                else
-                {
-                    // A triggered gate is driven open and held while its plate is down.
-                    _gateSlamming.Remove((screen, cell));
-                    _gateHold[(screen, cell)] = Constants.GateTimer;
-                }
-                break;
-
-            case TileId.Exit:
-            case TileId.Exit2:
-                _exitOpen = true;
-                break;
+            ++_currModifier;
+            if (_currModifier == 5) _currModifier = 0x8F;
+            else if (_currModifier == 9)
+            {
+                _currModifier = 0;
+                _trob.Type = -1;
+            }
         }
     }
 
     // ── gates ─────────────────────────────────────────────────────────────────
 
-    private readonly Dictionary<(int Screen, int Cell), int> _gateHold = new();
+    private static readonly byte[] GateCloseSpeeds = [0, 0, 0, 20, 40, 60, 80, 100, 120];
+    private static readonly sbyte[] DoorDelta = [-1, 4, 4];
 
     /// <summary>
-    /// Gates that have been raised and are now coming back down. A gate that was never
-    /// triggered is left at the height the level authored, open or shut — the original
-    /// never winds an untouched gate, and doing so shortens a shut one by a pixel.
+    /// animate_door. trob.type: 0 closing, 1 opening, 2 opening for good, 3..8 slamming
+    /// shut ever faster (a closer).
     /// </summary>
-    private readonly HashSet<(int Screen, int Cell)> _gateClosing = [];
-
-    /// <summary>Gates a closer has been pressed for: they drop fast, all the way.</summary>
-    private readonly HashSet<(int Screen, int Cell)> _gateSlamming = [];
-
-    /// <summary>How far a slammed gate drops per tick, in gate-height units.</summary>
-    private const int GateSlamStep = 10;
-
-    private void TickGates()
+    private void AnimateDoor()
     {
-        var done = new List<(int, int)>();
+        int animType = _trob.Type;
+        if (animType < 0) return;
 
-        foreach (var key in _gateHold.Keys.ToList())
+        if (animType >= 3)
         {
-            var (screen, cell) = key;
-            int s0 = screen - 1, row = cell / Coord.Cols, col = cell % Coord.Cols;
-
-            // A triggered gate winds up fast; height counts up towards fully raised.
-            int spec = _level.GetSpec(s0, row, col);
-            _level.SetSpec(s0, row, col, (byte)Math.Min(RoomView.GateOpen, spec + 4));
-
-            if (--_gateHold[key] <= 0) done.Add(key);
+            if (animType < 8)
+            {
+                ++animType;
+                _trob.Type = (sbyte)animType;
+            }
+            int newMod = _currModifier - GateCloseSpeeds[animType];
+            _currModifier = (byte)newMod;
+            if (newMod < 0)
+            {
+                _currModifier = 0;
+                _trob.Type = -1;
+            }
         }
-
-        foreach (var key in done) { _gateHold.Remove(key); _gateClosing.Add(key); }
-
-        foreach (var key in _gateSlamming.ToList())
+        else if (_currModifier != 0xFF)
         {
-            var (screen, cell) = key;
-            int s0 = screen - 1, row = cell / Coord.Cols, col = cell % Coord.Cols;
-
-            int spec = _level.GetSpec(s0, row, col);
-            if (spec > 0) _level.SetSpec(s0, row, col, (byte)Math.Max(0, spec - GateSlamStep));
-            else _gateSlamming.Remove(key);
+            _currModifier = (byte)(_currModifier + DoorDelta[animType]);
+            if (animType == 0)
+            {
+                if (_currModifier == 0) GateStop();
+            }
+            else if (_currModifier >= 188)
+            {
+                if (animType < 2)
+                {
+                    // Fully up: hold (238 counts down to 188 before it moves) and close.
+                    _currModifier = 238;
+                    _trob.Type = 0;
+                }
+                else
+                {
+                    _currModifier = 0xFF;
+                    GateStop();
+                }
+            }
         }
-
-        // A gate whose hold has run out drops shut again.
-        foreach (var key in _gateClosing.ToList())
+        else
         {
-            var (screen, cell) = key;
-            int s0 = screen - 1, row = cell / Coord.Cols, col = cell % Coord.Cols;
-
-            int spec = _level.GetSpec(s0, row, col);
-            if (spec > 0) _level.SetSpec(s0, row, col, (byte)Math.Max(0, spec - 2));
-            else _gateClosing.Remove(key);
+            GateStop();
         }
     }
 
-    private void TickPlates()
+    /// <summary>gate_stop.</summary>
+    private void GateStop() => _trob.Type = -1;
+
+    /// <summary>trigger_gate: what a button does to a gate; the trob type to animate it with.</summary>
+    private int TriggerGate(int room, int tilepos, int buttonType)
     {
-        foreach (int index in _activePlates.ToList())
+        byte modifier = ModAt(room, tilepos);
+        if (buttonType == (int)TileId.UPressPlate)
         {
-            int t = _links.Timer(index);
-            if (t is 0 or 31) { _activePlates.Remove(index); continue; }
-            _links.SetTimer(index, t - 1);
+            if (modifier == 0xFF) return -1;        // permanently open
+            if (modifier >= 188)
+            {
+                SetMod(room, tilepos, 238);         // already open: keep it open a while
+                return -1;
+            }
+            SetMod(room, tilepos, (byte)((modifier + 3) & 0xFC));
+            return 1;
         }
+        if (buttonType == (int)TileId.Rubble)
+        {
+            // A plate jammed by debris or a dead kid opens its gate for good.
+            if (modifier < 188) return 2;
+            SetMod(room, tilepos, 0xFF);
+            return -1;
+        }
+        return modifier != 0 ? 3 : -1;              // a closer slams it shut
+    }
+
+    // ── the exit door ─────────────────────────────────────────────────────────
+
+    private static readonly byte[] LeveldoorCloseSpeeds = [0, 5, 17, 99, 0];
+
+    /// <summary>
+    /// animate_leveldoor. trob.type 0..2 opens it one step a tick up to 43; 3..6 slams
+    /// the start room's door shut behind the kid.
+    /// </summary>
+    private void AnimateLeveldoor()
+    {
+        int trobType = _trob.Type;
+        if (_trob.Type < 0) return;
+
+        if (trobType >= 3)
+        {
+            ++_trob.Type;
+            _currModifier = (byte)(_currModifier - LeveldoorCloseSpeeds[_trob.Type - 3]);
+            if ((sbyte)_currModifier < 0)
+            {
+                _currModifier = 0;
+                _trob.Type = -1;
+            }
+        }
+        else
+        {
+            ++_currModifier;
+            if (_currModifier >= 43)
+            {
+                _trob.Type = -1;
+                if (LeveldoorOpen is 0 or 2)
+                {
+                    LeveldoorOpen = 1;
+                    if (_levelNumber == 4)
+                    {
+                        // Special event: the mirror appears on level 4.
+                        GetTile(4, 4, 0);
+                        SetTile(_currRoom, _currTilepos, (int)TileId.Mirror);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>start_level_door: the start room's door begins open and slams shut.</summary>
+    private void StartLevelDoor(int room, int tilepos)
+    {
+        SetMod(room, tilepos, 43);
+        AddTrob(room, tilepos, 3);
+    }
+
+    /// <summary>find_start_level_door (seg003).</summary>
+    public void FindStartLevelDoor(int kidRoom)
+    {
+        if (!ValidRoom(kidRoom)) return;
+        for (int tilepos = 0; tilepos < Level.CellsPerScreen; tilepos++)
+            if (TileAt(kidRoom, tilepos) == (int)TileId.Exit)
+                StartLevelDoor(kidRoom, tilepos);
+    }
+
+    // ── buttons ───────────────────────────────────────────────────────────────
+
+    /// <summary>trigger_1: the trob type for a target of a button, or -1 for none.</summary>
+    private int Trigger1(int targetType, int room, int tilepos, int buttonType)
+    {
+        if (targetType == (int)TileId.Gate) return TriggerGate(room, tilepos, buttonType);
+        if (targetType == (int)TileId.Exit) return ModAt(room, tilepos) != 0 ? -1 : 1;
+        return -1;
+    }
+
+    /// <summary>do_trigger_list: trigger everything on a button's link chain.</summary>
+    private void DoTriggerList(int index, int buttonType)
+    {
+        while (index is >= 0 and < 256)
+        {
+            int room = _links.Screen(index);
+            int tilepos = _links.Cell(index);
+            if (ValidRoom(room) && tilepos < Level.CellsPerScreen)
+            {
+                int targetType = TileAt(room, tilepos);
+                int result = Trigger1(targetType, room, tilepos, buttonType);
+                if (result >= 0) AddTrob(room, tilepos, result);
+            }
+            if (_links.IsLast(index)) break;
+            index++;
+        }
+    }
+
+    /// <summary>
+    /// trigger_button: press the button at curr_room/curr_tilepos. A plate stays down
+    /// for 5 ticks after the last press (a timer of 31 means jammed for good).
+    /// <paramref name="buttonType"/> 0 and <paramref name="modifier"/> -1 mean "the
+    /// tile's own".
+    /// </summary>
+    private void TriggerButton(int buttonType, int modifier)
+    {
+        GetCurrTile(_currTilepos);
+        if (buttonType == 0) buttonType = _currTile;
+        if (modifier == -1) modifier = _currModifier;
+
+        int linkTimer = _links.Timer(modifier);
+        if (linkTimer == 0x1F) return;              // jammed
+        _links.SetTimer(modifier, 5);
+        if (linkTimer < 2) AddTrob(_currRoom, _currTilepos, 1);
+        DoTriggerList(modifier, buttonType);
+    }
+
+    /// <summary>
+    /// Presses the button at a cell (get_tile then trigger_button). Level 1 uses this
+    /// at the start: the closer in room 5 is pressed as the kid drops in, so the gate
+    /// beside the first room — authored open — slams shut (do_startpos).
+    /// </summary>
+    public void PressButton(int room, int col, int row)
+    {
+        GetTile(room, col, row);
+        if (ValidRoom(_currRoom)) TriggerButton(0, -1);
+    }
+
+    /// <summary>
+    /// died_on_button (JAMPP in MOVER.S): a dead kid's weight jams the plate. An opener
+    /// becomes floor and opens its gates for good; a closer stays down.
+    /// </summary>
+    private void DiedOnButton()
+    {
+        int buttonType = GetCurrTile(_currTilepos);
+        int modifier = _currModifier;
+        if (_currTile == (int)TileId.UPressPlate)
+        {
+            SetTile(_currRoom, _currTilepos, (int)TileId.Floor);
+            SetMod(_currRoom, _currTilepos, 0);
+            buttonType = (int)TileId.Rubble;        // force permanent open
+        }
+        else
+        {
+            SetTile(_currRoom, _currTilepos, (int)TileId.DPressPlate);
+        }
+        TriggerButton(buttonType, modifier);
+    }
+
+    /// <summary>animate_button: count the plate's timer down; it pops up below 2.</summary>
+    private void AnimateButton()
+    {
+        if (_trob.Type < 0) return;
+        int timer = (_links.Timer(_currModifier) - 1) & 0xFFFF;   // a word in the original
+        _links.SetTimer(_currModifier, timer);
+        if (timer < 2) _trob.Type = -1;
     }
 
     // ── loose floors ──────────────────────────────────────────────────────────
 
-    private void TickLoose(CharState kid)
+    /// <summary>animate_empty.</summary>
+    private void AnimateEmpty() => _trob.Type = -1;
+
+    /// <summary>
+    /// animate_loose. A modifier with bit 7 set is a board shaking after a knock
+    /// (0x80..0x83, then still again). Otherwise something is standing on it: it counts
+    /// up from 1 and at 11 the board comes away and falls as a mob.
+    /// </summary>
+    private void AnimateLoose()
     {
-        foreach (var key in _looseShaking.Keys.ToList())
+        if (_trob.Type < 0) return;
+
+        ++_currModifier;
+        if ((_currModifier & 0x80) != 0)
         {
-            int ticks = ++_looseShaking[key];
-            if (ticks < Constants.LooseTimer) continue;
+            // Just shaking. Level 13's auto-falling floors don't stop.
+            if (_levelNumber == LooseTilesLevel) return;
+            if (_currModifier >= 0x84)
+            {
+                _currModifier = 0;
+                _trob.Type = -1;
+            }
+        }
+        else if (_currModifier >= LooseFloorDelay)
+        {
+            int room = _trob.Room, tilepos = _trob.Tilepos;
+            _currModifier = RemoveLoose(room, tilepos);
+            _trob.Type = -1;
+            int row = tilepos / Coord.Cols;
+            _curmob = new Mob
+            {
+                Xh = (tilepos % Coord.Cols) << 2,
+                Y = YLooseLand[row + 1],
+                Room = room,
+                Speed = 0,
+                Type = 0,
+                Row = row,
+            };
+            AddMob();
+        }
+    }
 
-            var (screen, cell) = key;
-            int s0 = screen - 1, row = cell / Coord.Cols, col = cell % Coord.Cols;
+    private static readonly int[] YLooseLand = [2, 65, 128, 191, 254];
 
-            // The board drops out, leaving a hole; rubble lands on the floor below.
-            _level.SetTileType(s0, row, col, TileId.Space);
-            if (row + 1 < Coord.Rows && _level.GetTileId(s0, row + 1, col) == TileId.Floor)
-                _level.SetTileType(s0, row + 1, col, TileId.Rubble);
+    /// <summary>remove_loose: the board is gone; the space it leaves takes the level type.</summary>
+    private byte RemoveLoose(int room, int tilepos)
+    {
+        SetTile(room, tilepos, (int)TileId.Space);
+        return TblLevelType[Math.Clamp(_levelNumber, 0, TblLevelType.Length - 1)];
+    }
 
-            _looseShaking.Remove(key);
+    /// <summary>
+    /// make_loose_fall: something is on the loose floor at curr_tilepos; start its
+    /// countdown (unless it is a "solid" one, flagged 0x20, or already counting).
+    /// </summary>
+    private void MakeLooseFall(byte modifier)
+    {
+        if (!ValidRoom(_currRoom)) return;
+        if ((_level.LiveBlueType[Index(_currRoom, _currTilepos)] & 0x20) != 0) return;
+        if ((sbyte)ModAt(_currRoom, _currTilepos) > 0) return;
+        SetMod(_currRoom, _currTilepos, modifier);
+        AddTrob(_currRoom, _currTilepos, 0);
+    }
+
+    /// <summary>loose_make_shake: rattle the loose floor at curr_tilepos.</summary>
+    private void LooseMakeShake()
+    {
+        if (ModAt(_currRoom, _currTilepos) == 0 && _levelNumber != LooseTilesLevel)
+        {
+            SetMod(_currRoom, _currTilepos, 0x80);
+            AddTrob(_currRoom, _currTilepos, 1);
+        }
+    }
+
+    /// <summary>do_knock: every loose floor on a row of a room shakes.</summary>
+    private void DoKnock(int room, int tileRow)
+    {
+        for (int tileCol = 0; tileCol < Coord.Cols; tileCol++)
+            if (GetTile(room, tileCol, tileRow) == (int)TileId.Loose && ValidRoom(_currRoom))
+                LooseMakeShake();
+    }
+
+    /// <summary>
+    /// check_knock (seg003): a landing or a bump into the ceiling (the sequences'
+    /// jarU/jarD, <see cref="SeqEffects.JarFloor"/>) shakes the loose floors of the
+    /// row above (+1) or the kid's own row (-1).
+    /// </summary>
+    public void CheckKnock(CharState kid, int knock)
+    {
+        if (knock == 0) return;
+        DoKnock(kid.Room, kid.Row - (knock > 0 ? 1 : 0));
+    }
+
+    // ── mobs ──────────────────────────────────────────────────────────────────
+
+    /// <summary>A falling loose-floor piece (mob_type). Y is a byte, as in the original.</summary>
+    public struct Mob
+    {
+        public int Xh, Y, Room, Speed, Type, Row;
+    }
+
+    private const int MobsMax = 14;
+    private readonly List<Mob> _mobs = [];
+    private Mob _curmob;
+    private int _curmobIndex;
+
+    public IReadOnlyList<Mob> Mobs => _mobs;
+
+    /// <summary>add_mob.</summary>
+    private void AddMob()
+    {
+        if (_mobs.Count >= MobsMax) return;
+        _mobs.Add(_curmob);
+    }
+
+    /// <summary>do_mobs: move each piece (not the ones added this tick) and drop the landed.</summary>
+    public void DoMobs()
+    {
+        int nMobs = _mobs.Count;
+        for (_curmobIndex = 0; nMobs > _curmobIndex; ++_curmobIndex)
+        {
+            _curmob = _mobs[_curmobIndex];
+            MoveMob();
+            CheckLooseFallOnKid();
+            _mobs[_curmobIndex] = _curmob;
+        }
+        _mobs.RemoveAll(m => m.Speed == -1);
+    }
+
+    /// <summary>move_mob.</summary>
+    private void MoveMob()
+    {
+        if (_curmob.Type == 0) MoveLoose();
+        if (_curmob.Speed <= 0) ++_curmob.Speed;
+    }
+
+    private static readonly int[] YSomething = [-1, 62, 125, 188, 25];
+
+    /// <summary>move_loose: fall, row by row and room by room, until something stops it.</summary>
+    private void MoveLoose()
+    {
+        if (_curmob.Speed < 0) return;
+        if (_curmob.Speed < 29) _curmob.Speed += 3;
+        _curmob.Y = (byte)(_curmob.Y + _curmob.Speed);
+
+        if (_curmob.Room == 0)
+        {
+            if (_curmob.Y >= 210) _curmob.Speed = -2;     // fell out of the level
+            return;
+        }
+
+        if (_curmob.Y < 226 && YSomething[_curmob.Row + 1] <= _curmob.Y)
+        {
+            // Fell into a different row.
+            int tileTemp = GetTile(_curmob.Room, _curmob.Xh >> 2, _curmob.Row);
+            if (tileTemp == (int)TileId.Loose) LooseFall();
+            if (tileTemp is (int)TileId.Space or (int)TileId.Loose)
+            {
+                MobDownARow();
+                return;
+            }
+            DoKnock(_curmob.Room, _curmob.Row);
+            _curmob.Y = YSomething[_curmob.Row + 1];
+            _curmob.Speed = -2;
+            LooseLand();
+        }
+    }
+
+    /// <summary>
+    /// loose_land: the piece shatters on the floor below, leaving rubble. Landing on a
+    /// plate presses it (an opener is jammed open for good).
+    /// </summary>
+    private void LooseLand()
+    {
+        int buttonType = 0;
+        int tiletype = GetTile(_curmob.Room, _curmob.Xh >> 2, _curmob.Row);
+        if (!ValidRoom(_currRoom)) return;
+        switch ((TileId)tiletype)
+        {
+            case TileId.UPressPlate:
+            case TileId.PressPlate:
+                if (tiletype == (int)TileId.UPressPlate)
+                {
+                    SetTile(_currRoom, _currTilepos, (int)TileId.Rubble);
+                    buttonType = (int)TileId.Rubble;
+                }
+                TriggerButton(buttonType, -1);
+                tiletype = GetTile(_curmob.Room, _curmob.Xh >> 2, _curmob.Row);
+                goto case TileId.Floor;
+
+            case TileId.Floor:
+            case TileId.Spikes:
+            case TileId.Flask:
+            case TileId.Torch:
+            case (TileId)30:                            // torch with debris
+                SetTile(_currRoom, _currTilepos,
+                        tiletype is (int)TileId.Torch or 30 ? 30 : (int)TileId.Rubble);
+                break;
+        }
+    }
+
+    /// <summary>loose_fall: a piece hit another loose floor, which comes away too.</summary>
+    private void LooseFall()
+    {
+        SetMod(_currRoom, _currTilepos, RemoveLoose(_currRoom, _currTilepos));
+        _curmob.Speed >>= 1;
+        _mobs[_curmobIndex] = _curmob;
+        _curmob.Y = (byte)(_curmob.Y + 6);
+        MobDownARow();
+        AddMob();
+        _curmob = _mobs[_curmobIndex];
+    }
+
+    /// <summary>mob_down_a_row.</summary>
+    private void MobDownARow()
+    {
+        ++_curmob.Row;
+        if (_curmob.Row >= 3)
+        {
+            _curmob.Y = (byte)(_curmob.Y - 192);
+            _curmob.Row = 0;
+            _curmob.Room = _level.Below(_curmob.Room);
+        }
+    }
+
+    /// <summary>check_loose_fall_on_kid.</summary>
+    private void CheckLooseFallOnKid()
+    {
+        if (Kid is not { } kid) return;
+        if (kid.Room == _curmob.Room && kid.Col == _curmob.Xh >> 2
+            && _curmob.Y < (byte)kid.Y && (byte)kid.Y - 30 < _curmob.Y)
+        {
+            LooseFellOnKid?.Invoke();
+        }
+    }
+
+    // ── check_press (seg006) ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// check_press: is the kid pressing a plate or standing on a loose floor? Hanging
+    /// and climbing frames press the tile he holds; on-the-ground actions press the tile
+    /// underfoot, but only on frames whose foot touches the floor (<c>fcheckmark</c>).
+    /// Jumping up into a loose floor above knocks it loose.
+    /// </summary>
+    public void CheckPress(CharState kid, FrameDef frame)
+    {
+        int f = kid.Frame;
+        var action = kid.Action;
+        int tile;
+
+        if (f is >= 87 and < 100 or >= 135 and < 141)
+        {
+            tile = GetTile(kid.Room, kid.Col, kid.Row - 1);         // the ledge he holds
+        }
+        else if (action is CharAction.Turn or CharAction.Bumped
+                 or CharAction.Stand or CharAction.RunJump)
+        {
+            if (f == 79 && GetTile(kid.Room, kid.Col, kid.Row - 1) == (int)TileId.Loose)
+            {
+                MakeLooseFall(1);                                   // break it from below
+                return;
+            }
+            if (!frame.Check) return;
+            tile = GetTile(kid.Room, kid.Col, kid.Row);
+        }
+        else return;
+
+        if (!ValidRoom(_currRoom)) return;
+        if (tile is (int)TileId.UPressPlate or (int)TileId.PressPlate)
+        {
+            if (kid.Alive) TriggerButton(0, -1);
+            else DiedOnButton();
+        }
+        else if (tile == (int)TileId.Loose)
+        {
+            MakeLooseFall(1);
         }
     }
 }

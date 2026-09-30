@@ -24,23 +24,31 @@ public sealed class DosLevels
     {
         var res = _dat.Resource(FirstId + level);
         var lv = Level.Load(res[..2304].ToArray());
-        NormaliseGates(lv);
+        AlterModsAllrm(lv);
         return lv;
     }
 
     /// <summary>
-    /// In the DOS data a gate's BLUESPEC is a flag, not a height: 1 means it starts
-    /// open and anything else means shut (LOAD_ALTER_MOD turns 1 into the fully raised
-    /// 188 and the rest into 0). The simulation keeps gate height as 0..GateOpen, so
-    /// convert once here, in the pristine copy too so a level restart stays right.
+    /// alter_mods_allrm / load_alter_mod (SDLPoP seg008): the level file's modifiers
+    /// are flags that the game turns into working values once, at level load. A gate's
+    /// 1 means it starts open (height 188), anything else shut; a loose floor starts
+    /// still; a potion's type moves up to bits 3-7, leaving the low bits for its bubble.
+    /// Walls keep their raw "no blue" flag; the room drawer works out their neighbours.
+    /// Done in the pristine copy too, so a level restart stays right.
     /// </summary>
-    private static void NormaliseGates(Level lv)
+    private static void AlterModsAllrm(Level lv)
     {
         for (int i = 0; i < lv.BlueType.Length; i++)
         {
-            if ((TileId)(lv.BlueType[i] & 0x1F) != TileId.Gate) continue;
-            lv.BlueSpec[i] = (byte)(lv.BlueSpec[i] == 1 ? Sim.RoomView.GateOpen : 0);
-            lv.LiveBlueSpec[i] = lv.BlueSpec[i];
+            byte mod = lv.BlueSpec[i];
+            switch ((TileId)(lv.BlueType[i] & 0x1F))
+            {
+                case TileId.Gate: mod = (byte)(mod == 1 ? 188 : 0); break;
+                case TileId.Loose: mod = 0; break;
+                case TileId.Flask: mod = (byte)(mod << 3); break;
+                default: continue;
+            }
+            lv.BlueSpec[i] = lv.LiveBlueSpec[i] = mod;
         }
     }
 }

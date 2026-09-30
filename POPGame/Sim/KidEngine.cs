@@ -27,20 +27,22 @@ public sealed partial class KidEngine
     private readonly RoomView _view;
     private readonly Level _level;
     private readonly Func<FrameDef, (int W, int H)> _imageSize;
-    private readonly Func<bool> _levelDoorOpen;
+    private readonly Hazards _hazards;
+    private readonly int _levelNumber;
 
     private CharState _ch = null!;
     private SeqEffects _fx = null!;
 
     public KidEngine(SeqRunner seq, DosTables tables, RoomView view,
-                     Func<FrameDef, (int W, int H)> imageSize, Func<bool> levelDoorOpen)
+                     Func<FrameDef, (int W, int H)> imageSize, Hazards hazards, int levelNumber)
     {
         _seq = seq;
         _tables = tables;
         _view = view;
         _level = view.Level;
         _imageSize = imageSize;
-        _levelDoorOpen = levelDoorOpen;
+        _hazards = hazards;
+        _levelNumber = levelNumber;
         ClearCollRooms();
     }
 
@@ -51,13 +53,16 @@ public sealed partial class KidEngine
 
     /// <summary>
     /// play_kid_frame (seg000): control picks a sequence, the sequence poses the kid,
-    /// gravity moves him, then collisions, bumps and the floor are resolved.
-    /// check_press is run by <see cref="Hazards"/> right after this.
+    /// gravity moves him, then collisions, bumps and the floor are resolved, and last
+    /// the plates and loose floors he is on (check_press, check_knock).
     /// </summary>
     public void PlayKidFrame(CharState ch, InputState input, SeqEffects fx)
     {
         _ch = ch;
         _fx = fx;
+
+        Timers();
+        if (UpsideDown && !ch.Alive) UpsideDown = false;
 
         LoadFramDetCol();
         FellOut();
@@ -74,6 +79,38 @@ public sealed partial class KidEngine
         CheckBumped();
         CheckGatePush();
         CheckAction();
+        _hazards.CheckPress(ch, _frame);
+        CheckSpikeBelow();
+        _hazards.CheckKnock(ch, fx.JarFloor);
+    }
+
+    /// <summary>
+    /// check_spike_below (seg006): spikes under the kid's feet, or anywhere below him
+    /// down an open drop in this room, spring out. (Being spiked is not ported yet.)
+    /// </summary>
+    private void CheckSpikeBelow()
+    {
+        int rightCol = Coord.ColM7(_charXRight);
+        if (rightCol < 0) return;
+        int room = _ch.Room;
+        for (int col = Coord.ColM7(_charXLeft); col <= rightCol; ++col)
+        {
+            int row = _ch.Row;
+            bool notFinished;
+            do
+            {
+                notFinished = false;
+                if (GetTile(room, col, row) == TileId.Spikes)
+                {
+                    _hazards.StartAnimSpike(_posRoom, _posRow * Coord.Cols + _posCol);
+                }
+                else if (!TileIsFloor(_currTile2) && _currRoom != 0 && room == _currRoom)
+                {
+                    ++row;
+                    notFinished = true;
+                }
+            } while (notFinished);
+        }
     }
 
     /// <summary>exit_room (seg002): move the kid to the next room once he leaves this one.</summary>
@@ -112,9 +149,20 @@ public sealed partial class KidEngine
         ClearCollRooms();
         ResetControls();
         _grabTimer = 0;
+        UpsideDown = false;
+        _isFeatherFall = 0;
     }
 
-    private void PlaySeq() => _seq.Animate(_ch, _fx);
+    /// <summary>play_seq, then proc_get_object when the sequence reached its get-item opcode.</summary>
+    private void PlaySeq()
+    {
+        _seq.Animate(_ch, _fx, _isFeatherFall != 0);
+        if (_fx.DrankPotion)
+        {
+            _fx.DrankPotion = false;
+            ProcGetObject();
+        }
+    }
 
     // ── frame, column and object (seg006, seg008) ─────────────────────────────
 
@@ -285,9 +333,8 @@ public sealed partial class KidEngine
 
     /// <summary>
     /// can_bump_into_gate: a gate stops the kid while its bottom is below his head.
-    /// BLUESPEC here is SDLPoP's modifier / 4.
     /// </summary>
-    private bool CanBumpIntoGate() => Modif() + 6 < _charHeight;
+    private bool CanBumpIntoGate() => (Modif() >> 2) + 6 < _charHeight;
 
     // ── leaving the room (seg002) ─────────────────────────────────────────────
 

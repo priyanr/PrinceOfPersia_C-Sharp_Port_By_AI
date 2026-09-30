@@ -174,9 +174,10 @@ public sealed partial class KidEngine
         else if (frame == 109) ControlCrouched();
     }
 
-    /// <summary>control_crouched. (Picking up items is not ported.)</summary>
+    /// <summary>control_crouched.</summary>
     private void ControlCrouched()
     {
+        if (_controlShift2 == Held && CheckGetItem()) return;
         if (_controlY != 1)
         {
             StartSeq(Sim.Seq.StandUp);
@@ -188,9 +189,10 @@ public sealed partial class KidEngine
         }
     }
 
-    /// <summary>control_standing. (Swords and picking up items are not ported.)</summary>
+    /// <summary>control_standing. (Drawing the sword to fight is not ported.)</summary>
     private void ControlStanding()
     {
+        if (_controlShift2 == Held && _controlShift && CheckGetItem()) return;
         if (_controlShift)
         {
             if (_controlBackward == Held) BackPressed();
@@ -219,7 +221,7 @@ public sealed partial class KidEngine
         bool door = GetTileAtChar() == TileId.Exit
                     || GetTileBehindChar() == TileId.Exit
                     || GetTileInfrontofChar() == TileId.Exit;
-        if (door && StartRoom != _ch.Room && _levelDoorOpen())
+        if (door && StartRoom != _ch.Room && _hazards.ExitOpen)
         {
             GoUpLeveldoor();
             return;
@@ -256,7 +258,7 @@ public sealed partial class KidEngine
             _throughTile = GetTileBehindChar();
             GetTileAtChar();
             if (CanGrab()
-                && (_ch.FacingRight || GetTileAtChar() != TileId.Gate || Modif() >= 6))
+                && (_ch.FacingRight || GetTileAtChar() != TileId.Gate || Modif() >> 2 >= 6))
             {
                 _ch.X = _ch.DxForward(DistanceToEdgeWeight() - 9);
                 StartSeq(Sim.Seq.ClimbDown);
@@ -470,7 +472,7 @@ public sealed partial class KidEngine
         _controlUp = _controlShift2 = ReleaseArrows();
         GetTileAboveChar();
         if ((_currTile2 is TileId.Mirror or TileId.Slicer && _ch.FacingRight)
-            || (_currTile2 == TileId.Gate && !_ch.FacingRight && Modif() < 6))
+            || (_currTile2 == TileId.Gate && !_ch.FacingRight && Modif() >> 2 < 6))
         {
             seq = Sim.Seq.ClimbFail;
         }
