@@ -162,9 +162,9 @@ public sealed class Simulation
         set => _engine.DemoMode = value;
     }
 
-    /// <summary>clip_char: the rectangle the kid's sprite is drawn in this frame.</summary>
-    public ClipRect KidClip(int leveldoorYBottom, int leveldoorRight) =>
-        _engine.ClipChar(Kid, leveldoorYBottom, leveldoorRight);
+    /// <summary>add_kid_to_objtable: how the kid is drawn this frame (clip, tile, redraws).</summary>
+    public KidDrawInfo KidDraw(int leveldoorYBottom, int leveldoorRight) =>
+        _engine.KidDraw(Kid, leveldoorYBottom, leveldoorRight);
 
     public FrameDef KidFrame => Tables.Frames[Math.Clamp(Kid.Frame, 0, DosTables.FrameCount)];
 }

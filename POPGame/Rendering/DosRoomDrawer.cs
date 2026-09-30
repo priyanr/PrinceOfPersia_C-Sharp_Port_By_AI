@@ -49,6 +49,8 @@ public sealed class DosRoomDrawer
         Env = 6,
         /// <summary>Resource 360 + id of the same file: the wall bodies and brick detail.</summary>
         Wall = 7,
+        /// <summary>In <see cref="Mid"/>: draw the objects filed under tile <c>Id</c> here.</summary>
+        Objects = 98,
         /// <summary>A filled rectangle, not an image (the original's wipetable).</summary>
         Wipe = 99,
     }
@@ -69,6 +71,13 @@ public sealed class DosRoomDrawer
     /// </summary>
     public List<Op> WipesBack { get; } = [];
     public List<Op> WipesFore { get; } = [];
+
+    /// <summary>
+    /// The midtable, in drawing order: tile pieces redrawn over the characters,
+    /// interleaved with <see cref="Set.Objects"/> markers where the characters and
+    /// falling pieces filed under a tile are drawn. Built by <see cref="BuildMid"/>.
+    /// </summary>
+    public List<Op> Mid { get; } = [];
 
     private readonly DosDrawTables _t;
 
@@ -148,6 +157,116 @@ public sealed class DosRoomDrawer
             _drawBottomY = 2;
             DrawTileAboveRoom();
         }
+    }
+
+    // ---- the moving objects' redraw (redraw_needed_tiles) --------------------------
+
+    // floor_left_overlay (seg008): the floor's front edge while the kid climbs onto it,
+    // by frame 137..144. Not yet located in PRINCE.EXE; the values are SDLPoP's.
+    private static readonly byte[] FloorLeftOverlay = [32, 151, 151, 150, 150, 151, 32, 32];
+
+    private int _kidFrame;
+    private readonly byte[] _tileObjectRedraw = new byte[31];
+
+    /// <summary>
+    /// redraw_needed_tiles (seg008), for the kid and falling pieces: tiles are visited
+    /// bottom row first, left to right; a tile marked by redraw_at_char2 / draw_mob has
+    /// its overlay added, then the objects filed under it are drawn. So a tile's pieces
+    /// cover the objects filed under earlier tiles, and objects filed under later tiles
+    /// cover them. Call after <see cref="Build"/>.
+    /// </summary>
+    /// <param name="redraw2">redraw_frames2: tiles to redraw with draw_other_overlay.</param>
+    /// <param name="floorOverlay">redraw_frames_floor_overlay: tiles for draw_floor_overlay.</param>
+    /// <param name="objectTiles">The tiles (0..30) objects are filed under.</param>
+    public void BuildMid(int room, int kidFrame, IEnumerable<int> redraw2, IEnumerable<int> floorOverlay,
+                         IEnumerable<int> objectTiles)
+    {
+        Mid.Clear();
+        _kidFrame = kidFrame;
+        var r2 = new bool[30];
+        var fo = new bool[30];
+        foreach (int t in redraw2) if (t is >= 0 and < 30) r2[t] = true;
+        foreach (int t in floorOverlay) if (t is >= 0 and < 30) fo[t] = true;
+        Array.Clear(_tileObjectRedraw);
+        foreach (int t in objectTiles) if (t is >= 0 and <= 30) _tileObjectRedraw[t] = 1;
+
+        _drawnRoom = room;
+        LoadRoomLinks();
+        LoadLeftRoom();
+        Objects(30);
+        for (_drawnRow = 2; _drawnRow >= 0; _drawnRow--)
+        {
+            LoadRowBelow();
+            _drawBottomY = 63 * _drawnRow + 65;
+            _drawMainY = _drawBottomY - 3;
+            for (_drawnCol = 0; _drawnCol < 10; _drawnCol++)
+            {
+                LoadCurrAndLeftTile();
+                int tilepos = _drawnRow * 10 + _drawnCol;
+                if (r2[tilepos]) DrawOtherOverlay();
+                else if (fo[tilepos]) DrawFloorOverlay();
+                if (_tileObjectRedraw[tilepos] != 0)
+                {
+                    if (_tileObjectRedraw[tilepos] == 0xFF) Objects(tilepos - 1);
+                    Objects(tilepos);
+                    _tileObjectRedraw[tilepos] = 0;
+                }
+            }
+        }
+        _addTo = Back;
+    }
+
+    private void Objects(int tilepos) => Mid.Add(new Op(Set.Objects, tilepos, 0, 0, BlitMode.Trans));
+
+    /// <summary>draw_floor_overlay: the floor's front edge over a kid climbing onto it from the left.</summary>
+    private void DrawFloorOverlay()
+    {
+        if (_tileLeft != Empty) return;
+        if (_currTile is Floor or Pillar or Stuck or Torch)
+        {
+            if (_kidFrame is >= 137 and <= 144)
+                Add(Mid, Set.Env, FloorLeftOverlay[_kidFrame - 137], _drawXh, 0,
+                    (_currTile == Stuck ? 1 : 0) + _drawMainY, BlitMode.Trans);
+            _addTo = Mid;
+            DrawTileBottom();
+            _addTo = Back;
+        }
+        else DrawOtherOverlay();
+    }
+
+    /// <summary>
+    /// draw_other_overlay: a tile with an open space on its left is drawn again over
+    /// whoever is passing it; one with an open space two to the left is drawn again
+    /// behind as well, and the objects of the tile to its left drawn again after it.
+    /// </summary>
+    private void DrawOtherOverlay()
+    {
+        if (_tileLeft == Empty)
+        {
+            _addTo = Mid;
+            DrawTile2();
+        }
+        else if (_currTile != Empty && _drawnCol > 0
+                 && TileToDraw(_drawnRoom, _drawnCol - 2, _drawnRow, Empty).Tile == Empty)
+        {
+            _addTo = Mid;
+            DrawTile2();
+            _addTo = Back;
+            DrawTile2();
+            _tileObjectRedraw[_drawnRow * 10 + _drawnCol] = 0xFF;
+        }
+        _addTo = Back;
+    }
+
+    /// <summary>draw_tile2.</summary>
+    private void DrawTile2()
+    {
+        DrawTileRight();
+        DrawTileAnimRight();
+        DrawTileBase();
+        DrawTileAnim();
+        DrawTileBottom();
+        DrawLoose();
     }
 
     // ---- level access -------------------------------------------------------------

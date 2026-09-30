@@ -20,6 +20,9 @@ Check each in DOSBox (or at least with `--dump`) and log what you find in HISTOR
 - **Sprite clipping**: facing right into a wall, climbing up under a floor, climbing the
   exit stairs. The demo must still match; the level-door wipe moved to layer 0.
 - **Death**: the impale/halve/fall animation plays out and Shift restarts.
+- **Climbing onto a ledge** (the user's report): the floor edge should cover the kid
+  (draw_floor_overlay). Also check hanging and jumping past ledge edges
+  (draw_other_overlay), and that the demo still matches (falls now redraw tiles over him).
 
 ## Movement / physics
 - Level 1's first crouch should last until the presentation music ends

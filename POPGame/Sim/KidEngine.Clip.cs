@@ -10,6 +10,16 @@ public readonly record struct ClipRect(int Left, int Top, int Right, int Bottom)
 }
 
 /// <summary>
+/// What add_kid_to_objtable (seg008) works out for drawing the kid: his clip rectangle
+/// (clip_char), the tile he is filed under for drawing (set_objtile_at_char), his
+/// sprite's bottom y, and the tiles redraw_at_char2 marks to be drawn again over him —
+/// <see cref="FloorOverlay"/> for climbing (frames 137..144), <see cref="Redraw2"/>
+/// while hanging, jumping or falling. Tile positions are 0..29 in the drawn room.
+/// </summary>
+public sealed record KidDrawInfo(ClipRect Clip, int ObjTilepos, int ObjY,
+                                 IReadOnlyList<int> Redraw2, IReadOnlyList<int> FloorOverlay);
+
+/// <summary>
 /// clip_char (seg006): where the kid's sprite is cut off so walls, doortops and the
 /// floor above hide the parts of him behind them. add_kid_to_objtable (seg008) runs it
 /// at draw time on a copy of the kid (loadkid without savekid).
@@ -23,7 +33,7 @@ public sealed partial class KidEngine
     /// (<paramref name="leveldoorYBottom"/>, <paramref name="leveldoorRight"/>) comes
     /// from the room drawer, for climbing the exit stairs.
     /// </summary>
-    public ClipRect ClipChar(CharState kid, int leveldoorYBottom, int leveldoorRight)
+    public KidDrawInfo KidDraw(CharState kid, int leveldoorYBottom, int leveldoorRight)
     {
         // Drawing must not disturb the simulation, which keeps these globals between
         // routines: work on a copy of the kid and put everything back afterwards.
@@ -41,7 +51,20 @@ public sealed partial class KidEngine
             LoadFramDetCol();
             LoadFrameToObj();
             SetCharCollision();
-            return ClipCharCore(leveldoorYBottom, leveldoorRight);
+
+            // The rest of set_char_collision: the rows and columns the sprite spans.
+            int charTopY = _objY - _charHeight + 1;
+            if (charTopY >= 192) charTopY = 0;
+            int charTopRow = YToRowMod4(charTopY);
+            int charBottomRow = YToRowMod4(_objY);
+            if (charBottomRow == -1) charBottomRow = 3;
+            int charColLeft = Math.Max(Coord.BlockX(_charXLeft), 0);
+            int charColRight = Math.Min(Coord.BlockX(_charXRight), 9);
+
+            int objTilepos = SetObjtileAtChar(charBottomRow, charColLeft);
+            var (redraw2, floorOverlay) = RedrawAtChar2(charTopRow, charBottomRow, charColLeft, charColRight);
+            var clip = ClipCharCore(leveldoorYBottom, leveldoorRight);
+            return new KidDrawInfo(clip, objTilepos, _objY, redraw2, floorOverlay);
         }
         finally
         {
@@ -56,6 +79,75 @@ public sealed partial class KidEngine
         }
     }
 
+    /// <summary>get_tilepos (seg006): -(col + 1) above the room, 30 anywhere else outside it.</summary>
+    private static int GetTilepos(int tileCol, int tileRow)
+    {
+        if (tileRow < 0) return -(tileCol + 1);
+        if (tileRow >= 3 || tileCol >= 10 || tileCol < 0) return 30;
+        return tileRow * 10 + tileCol;
+    }
+
+    /// <summary>
+    /// set_objtile_at_char (seg006): the tile the kid is drawn with — the one left of
+    /// his column while he climbs, hangs or is in the air.
+    /// </summary>
+    private int SetObjtileAtChar(int charBottomRow, int charColLeft)
+    {
+        int frame = _ch.Frame;
+        var action = _ch.Action;
+        int row, col;
+        if (action == CharAction.RunJump) { row = charBottomRow; col = charColLeft; }
+        else { row = _ch.Row; col = _ch.Col; }
+        if (frame is >= 135 and < 149 || action is CharAction.HangClimb or CharAction.InMidair
+            or CharAction.InFreefall or CharAction.HangStraight)
+        {
+            --col;
+        }
+        int tilepos = GetTilepos(col, row);
+        return tilepos < 0 ? 30 : tilepos;     // get_tilepos_nominus
+    }
+
+    /// <summary>
+    /// redraw_at_char2 (seg003): the tiles the kid overlaps that are drawn again over
+    /// him. Climbing up (frames 137..144) redraws the floor's front edge
+    /// (set_redraw_floor_overlay); hanging, jumping and falling redraw the tiles whose
+    /// left neighbour is open (set_redraw2). Tiles above the room are left out
+    /// (redraw_frames_above only repaints the back layer).
+    /// </summary>
+    private (List<int> Redraw2, List<int> FloorOverlay) RedrawAtChar2(
+        int charTopRow, int charBottomRow, int charColLeft, int charColRight)
+    {
+        var redraw2 = new List<int>();
+        var floorOverlay = new List<int>();
+        var action = _ch.Action;
+        int frame = _ch.Frame;
+        var marks = redraw2;
+        if (frame is < 78 or >= 80)
+        {
+            if (frame is >= 137 and < 145)
+            {
+                marks = floorOverlay;
+            }
+            else if (action is not (CharAction.HangClimb or CharAction.InMidair or CharAction.InFreefall
+                                    or CharAction.HangStraight)
+                     && (action != CharAction.Bumped || frame is < 102 or > 106))
+            {
+                return (redraw2, floorOverlay);
+            }
+        }
+        for (int col = charColRight; col >= charColLeft; --col)
+        {
+            if (action != CharAction.HangClimb) Mark(marks, GetTilepos(col, charBottomRow));
+            if (charTopRow != charBottomRow) Mark(marks, GetTilepos(col, charTopRow));
+        }
+        return (redraw2, floorOverlay);
+
+        static void Mark(List<int> list, int tilepos)
+        {
+            if (tilepos is >= 0 and < 30) list.Add(tilepos);
+        }
+    }
+
     private ClipRect ClipCharCore(int leveldoorYBottom, int leveldoorRight)
     {
         int frame = _ch.Frame;
@@ -64,7 +156,6 @@ public sealed partial class KidEngine
         int row = _ch.Row;
         int top = 0, right = 320;
 
-        // The rest of set_char_collision: the sprite's top and the columns it spans.
         int charTopY = _objY - _charHeight + 1;
         if (charTopY >= 192) charTopY = 0;
         int charTopRow = YToRowMod4(charTopY);

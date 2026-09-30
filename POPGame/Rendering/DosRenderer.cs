@@ -86,9 +86,17 @@ public sealed class DosRenderer
         }
 
         // draw_tables: wipes 0, back table, characters, wipes 1, front table.
+        // draw_moving comes after the room: its redraws append to the back table.
+        var mid = MidObjects(sim, out var kidDraw);
+        if (kid.Room >= 1 && kid.Room <= Level.NumScreens)
+            _drawer.BuildMid(kid.Room, kid.Frame, kidDraw?.Redraw2 ?? [],
+                             kidDraw?.FloorOverlay ?? [], mid.Select(o => o.Tilepos).ToList());
+        else
+            _drawer.Mid.Clear();
+
         DrawOps(_drawer.WipesBack);
         DrawOps(_drawer.Back);
-        DrawMid(sim);
+        DrawMid(mid);
         DrawOps(_drawer.WipesFore);
         DrawOps(_drawer.Fore);
 
@@ -96,42 +104,85 @@ public sealed class DosRenderer
         if (sim.UpsideDown) FlipGameplay();
     }
 
-    /// <summary>
-    /// The objects between the back and front layers: the kid and any falling
-    /// floor pieces, in the original's order (compare_curr_objs: lower y first, but
-    /// pieces among themselves the other way round).
-    /// </summary>
-    private void DrawMid(Simulation sim)
-    {
-        var objs = new List<(int Y, bool IsMob, Action Draw)>();
-        int room = sim.Kid.Room;
-        if (room >= 1 && room <= Level.NumScreens)
-        {
-            int above = sim.Level.Above(room), below = sim.Level.Below(room);
-            foreach (var mob in sim.Hazards.Mobs)
-            {
-                if (MobY(mob, room, above, below) is not { } y) continue;
-                int xh = mob.Xh;
-                objs.Add((y, true, () => DrawMob(xh, y)));
-            }
-        }
-        var f = sim.KidFrame;
-        objs.Add((sim.Kid.Y + f.Dy, false, () => DrawKid(sim)));
+    private readonly record struct MidObject(int Tilepos, int Y, bool IsMob, Action Draw);
 
-        // A stable bubble sort, as the original does it.
-        for (bool swapped = true; swapped;)
+    /// <summary>
+    /// The objtable: falling floor pieces (draw_mobs), then the kid (draw_people),
+    /// each filed under a tile (obj_tilepos). Falling pieces also mark tiles for
+    /// redraw over them, like the kid; those go into <paramref name="kidDraw"/>'s lists.
+    /// </summary>
+    private List<MidObject> MidObjects(Simulation sim, out KidDrawInfo? kidDraw)
+    {
+        var objs = new List<MidObject>();
+        kidDraw = null;
+        int room = sim.Kid.Room;
+        if (room < 1 || room > Level.NumScreens) return objs;
+
+        var redraw2 = new List<int>();
+        int above = sim.Level.Above(room), below = sim.Level.Below(room);
+        foreach (var mob in sim.Hazards.Mobs)
         {
-            swapped = false;
-            for (int i = 0; i < objs.Count - 1; i++)
-            {
-                var (a, b) = (objs[i], objs[i + 1]);
-                bool swap = a.IsMob && b.IsMob ? a.Y < b.Y : a.Y > b.Y;
-                if (!swap) continue;
-                (objs[i], objs[i + 1]) = (b, a);
-                swapped = true;
-            }
+            if (MobY(mob, room, above, below) is not { } y) continue;
+            int xh = mob.Xh;
+            // draw_mob: filed under its own tile; the tile right of it (and the one
+            // above that, once it straddles two rows) is redrawn over it.
+            int col = xh >> 2, row = YToRowMod4(y);
+            int tilepos = GetTilepos(col, row);
+            objs.Add(new MidObject(tilepos < 0 ? 30 : tilepos, y, true, () => DrawMob(xh, y)));
+            redraw2.Add(GetTilepos(col + 1, row));
+            int topRow = YToRowMod4(y - 18);
+            if (topRow != row) redraw2.Add(GetTilepos(col + 1, topRow));
         }
-        foreach (var o in objs) o.Draw();
+
+        var kd = sim.KidDraw(_drawer.LeveldoorYBottom, _drawer.LeveldoorRight);
+        if (!sim.KidFrame.IsBlank)
+            objs.Add(new MidObject(kd.ObjTilepos, kd.ObjY, false, () => DrawKid(sim, kd.Clip)));
+        kidDraw = kd with { Redraw2 = [.. kd.Redraw2, .. redraw2] };
+        return objs;
+    }
+
+    private static int YToRowMod4(int y) => (y + 60) / 63 % 4 - 1;
+
+    private static int GetTilepos(int col, int row)
+    {
+        if (row < 0) return -(col + 1);
+        if (row >= 3 || col >= 10 || col < 0) return 30;
+        return row * 10 + col;
+    }
+
+    /// <summary>
+    /// The midtable: the room drawer's redraws in tile order, with the objects filed
+    /// under each tile drawn at its marker (draw_objtable_items_at_tile). Objects under
+    /// one tile are taken last-added first and bubble-sorted as compare_curr_objs does:
+    /// lower y first, but falling pieces among themselves the other way round.
+    /// </summary>
+    private void DrawMid(List<MidObject> objs)
+    {
+        foreach (var op in _drawer.Mid)
+        {
+            if (op.Set != DosRoomDrawer.Set.Objects)
+            {
+                DrawOps([op]);
+                continue;
+            }
+
+            var here = new List<MidObject>();
+            for (int i = objs.Count - 1; i >= 0; i--)
+                if (objs[i].Tilepos == op.Id) here.Add(objs[i]);
+            for (bool swapped = true; swapped;)
+            {
+                swapped = false;
+                for (int i = 0; i < here.Count - 1; i++)
+                {
+                    var (a, b) = (here[i], here[i + 1]);
+                    bool swap = a.IsMob && b.IsMob ? a.Y < b.Y : a.Y > b.Y;
+                    if (!swap) continue;
+                    (here[i], here[i + 1]) = (b, a);
+                    swapped = true;
+                }
+            }
+            foreach (var o in here) o.Draw();
+        }
     }
 
     /// <summary>draw_mob: where a falling piece shows in the drawn room, if it does.</summary>
@@ -284,7 +335,7 @@ public sealed class DosRenderer
         }
     }
 
-    private void DrawKid(Simulation sim)
+    private void DrawKid(Simulation sim, ClipRect c)
     {
         var ch = sim.Kid;
         var f = sim.KidFrame;
@@ -301,7 +352,6 @@ public sealed class DosRenderer
         if (ch.FacingRight) px -= img.Width;
         int py = ch.Y + f.Dy;
         // clip_char: walls, doortops and the floor above cut the sprite off.
-        var c = sim.KidClip(_drawer.LeveldoorYBottom, _drawer.LeveldoorRight);
         Frame.Blit(img, _kid.Palette, px, py - img.Height + 1, ch.FacingRight,
                    clip: (c.Left, c.Top, c.Right, c.Bottom));
     }

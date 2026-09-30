@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-30 (later still) — Tiles redrawn over the kid: climbing goes behind the floor edge
+
+Reported by the user: climbing up onto a ledge, the kid was drawn over the floor slab
+instead of behind its front edge. The original redraws parts of the tiles the kid
+overlaps on top of him (seg008 redraw_needed_tiles), and we didn't.
+
+- **draw_floor_overlay**: while climbing (frames 137..144) the floor he climbs onto is
+  redrawn over him (`floor_left_overlay` + the floor's bottom piece), when the tile to
+  its left is open.
+- **draw_other_overlay**: while hanging, jumping or falling (and for falling floor
+  pieces), a tile with an open space on its left is drawn again over him.
+- Objects are filed under a tile (set_objtile_at_char; draw_mob) and drawn when the
+  redraw pass reaches that tile, bottom row first, so the tiles marked by
+  redraw_at_char2 after it cover him. The marks and the clip come from
+  `KidEngine.KidDraw` (add_kid_to_objtable).
+- `floor_left_overlay` is SDLPoP's table; not yet located in PRINCE.EXE.
+- Not compared with DOSBox (no DOS files in this session).
+
 ## 2026-09-30 (later) — Spikes, chompers, palace graphics, sprite clipping, death wait
 
 Ported in a cloud session with no DOS install and no DOSBox, so **nothing here has been
