@@ -39,7 +39,6 @@ public sealed class DosRenderer
     /// </summary>
     public const int BackgroundYOffset = 0;
 
-    private int _tick;
 
     public Framebuffer Frame { get; } = new(ScreenW, ScreenH);
 
@@ -68,7 +67,6 @@ public sealed class DosRenderer
 
     public void Draw(Simulation sim)
     {
-        _tick++;
         Frame.Clear(0, 0, 0);
 
         _envType = DosLevels.LevelType(sim.LevelNumber);
@@ -76,7 +74,7 @@ public sealed class DosRenderer
 
         var kid = sim.Kid;
         if (kid.Room >= 1 && kid.Room <= Level.NumScreens)
-            _drawer.Build(sim.Level, kid.Room, kid.Room, kid.Row, kid.Col, _tick, _envType);
+            _drawer.Build(sim.Level, kid.Room, kid.Room, kid.Row, kid.Col, sim.TickCount, _envType);
         else
         {
             _drawer.Back.Clear();

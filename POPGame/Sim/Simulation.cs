@@ -124,8 +124,12 @@ public sealed class Simulation
         CheckTheEnd();
     }
 
+    /// <summary>Game ticks run so far (12 a second); torches and potions animate from it.</summary>
+    public int TickCount { get; private set; }
+
     public void Tick(InputState input)
     {
+        TickCount++;
         Effects.Clear();
 
         // play_frame (seg000): falling pieces and animated tiles move first, then the

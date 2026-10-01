@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-01 — Torch flames and potion bubbles at game speed
+
+Reported by the user: torches flickered far too fast. The flame and bubble frames were
+stepped once per *drawn* frame, which is 60 a second in the window (Raylib), instead of
+once per game tick (12 a second). Headless dumps draw once per tick, so they looked
+right. They now step from `Simulation.TickCount`. Phases are still derived from the tick,
+not the original's prandom trobs (PENDING.md).
+
 ## 2026-09-30 (later still) — Tiles redrawn over the kid: climbing goes behind the floor edge
 
 Reported by the user: climbing up onto a ledge, the kid was drawn over the floor slab
