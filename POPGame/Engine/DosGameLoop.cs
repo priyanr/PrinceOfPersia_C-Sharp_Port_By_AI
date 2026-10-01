@@ -40,6 +40,10 @@ public sealed class DosGameLoop
         {
             poll.Poll(input);
 
+            // Debug: F8 unites the kid with his shadow, which the level 12 bridge
+            // waits for (the shadow and the sword fight aren't ported yet).
+            if (Raylib.IsKeyPressed(KeyboardKey.F8)) sim.UniteWithShadow();
+
             acc += Raylib.GetFrameTime();
             while (acc >= TickSeconds)
             {
@@ -95,7 +99,8 @@ public sealed class DosGameLoop
     private static void DrawDebug(Simulation sim)
     {
         var k = sim.Kid;
-        Raylib.DrawText($"HP {new string('|', Math.Max(0, k.Hp))}   level {sim.LevelNumber}   room {k.Room}",
+        Raylib.DrawText($"HP {new string('|', Math.Max(0, k.Hp))}   level {sim.LevelNumber}   room {k.Room}" +
+                        (sim.LevelNumber == 12 ? (sim.UnitedWithShadow != 0 ? "   united" : "   F8 = unite with shadow") : ""),
                         6, 6, 20, Color.Red);
         if (sim.ShowPressButton)
         {

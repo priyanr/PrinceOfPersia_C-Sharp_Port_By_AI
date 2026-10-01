@@ -28,9 +28,32 @@ public sealed partial class KidEngine
     public int FlashColor { get; private set; }
     public int FlashTime { get; set; }
 
+    /// <summary>
+    /// united_with_shadow: 0 until the kid unites with his shadow (level 12), then 42
+    /// counting down while they flash, then -1 for good. Level 12's hidden floors only
+    /// appear once it is negative (check_on_floor).
+    /// </summary>
+    public int UnitedWithShadow { get; private set; }
+
+    /// <summary>
+    /// The uniting itself (check_shadow, seg002): a white flash, one more hit point
+    /// (add_life), and the flashing count. In the original it happens when the kid
+    /// walks into the shadow with his sword away; there is no shadow yet, so the live
+    /// game's debug key calls this.
+    /// </summary>
+    public void UniteWithShadow(CharState ch)
+    {
+        if (UnitedWithShadow != 0) return;
+        Flash(15, 18);                                      // bright white
+        ch.MaxHp = Math.Min(ch.MaxHp + 1, 10);              // add_life / set_health_life
+        ch.Hp = ch.MaxHp;
+        UnitedWithShadow = 42;
+    }
+
     /// <summary>timers (seg003): the parts of it the kid needs.</summary>
     private void Timers()
     {
+        if (UnitedWithShadow > 0 && --UnitedWithShadow == 0) --UnitedWithShadow;
         if (_isFeatherFall != 0 && ++_isFeatherFall > FeatherFallTicks) _isFeatherFall = 0;
     }
 

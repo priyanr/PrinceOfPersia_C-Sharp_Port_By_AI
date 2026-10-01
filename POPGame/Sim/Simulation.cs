@@ -104,6 +104,12 @@ public sealed class Simulation
     /// <summary>The level's animated tiles and falling floor pieces.</summary>
     public Hazards Hazards => _hazards;
 
+    /// <summary>united_with_shadow (see <see cref="KidEngine.UnitedWithShadow"/>).</summary>
+    public int UnitedWithShadow => _engine.UnitedWithShadow;
+
+    /// <summary>Debug: unite with the shadow now (the shadow isn't ported yet).</summary>
+    public void UniteWithShadow() => _engine.UniteWithShadow(Kid);
+
     /// <summary>upside_down: draw the screen flipped (a potion's effect).</summary>
     public bool UpsideDown => _engine.UpsideDown;
 

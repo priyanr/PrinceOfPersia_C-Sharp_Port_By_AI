@@ -67,8 +67,29 @@ public sealed partial class KidEngine
     {
         if (!_frame.Check) return;
         if (GetTileAtChar() == TileId.Block) InWall();
-        if (!TileIsFloor(_currTile2))
-            StartFall();    // (level 12's appearing floor is not ported)
+        if (TileIsFloor(_currTile2)) return;
+
+        // Special event: level 12's hidden bridge. Once the kid has united with his
+        // shadow, floor appears under him on the top row of room 2, and of room 13 from
+        // column 6 on: this tile and the next one along.
+        if (_levelNumber == 12 && UnitedWithShadow < 0 && _ch.Row == 0
+            && (_ch.Room == 2 || (_ch.Room == 13 && _tileCol >= 6)))
+        {
+            SetTileAtPos(0, TileId.Floor);
+            SetTileAtPos(1, TileId.Floor);
+        }
+        else
+        {
+            StartFall();
+        }
+    }
+
+    /// <summary>curr_room_tiles[curr_tilepos + offset] = tile, for the last tile read.</summary>
+    private void SetTileAtPos(int offset, TileId tile)
+    {
+        int tilepos = _posRow * Coord.Cols + _posCol + offset;
+        if (_posRoom <= 0 || tilepos >= Level.CellsPerScreen) return;
+        _level.LiveBlueType[(_posRoom - 1) * Level.CellsPerScreen + tilepos] = (byte)tile;
     }
 
     /// <summary>start_fall: the fall sequence depends on the frame the kid dropped out of.</summary>

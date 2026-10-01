@@ -62,6 +62,9 @@ public static class HeadlessRun
             sim.PlaceKid(p[0], p[1], p[2]);
         }
 
+        // POP_UNITED=1: the kid has already united with his shadow (level 12's bridge).
+        if (Environment.GetEnvironmentVariable("POP_UNITED") == "1") sim.UniteWithShadow();
+
         // POP_DEMO=1 drives the kid from the demo move table (level 0's attract mode).
         if (Environment.GetEnvironmentVariable("POP_DEMO") == "1") sim.DemoMode = true;
 

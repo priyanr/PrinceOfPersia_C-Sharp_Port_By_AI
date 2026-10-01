@@ -34,9 +34,10 @@ Check each in DOSBox (or at least with `--dump`) and log what you find in HISTOR
   (need_level1_music); with no sound we stand up straight away.
 - Jumping through the mirror should release the kid's shadow (jump_through_mirror,
   seg003); needs other characters first. `KidEngine.JumpedThroughMirror` is set.
-- Level 12 phantom bridge (check_on_floor makes floor appear in rooms 2 and 13): the
-  original only does it once the kid has united with his shadow (united_with_shadow
-  < 0), so it needs the shadow first.
+- Level 12: the bridge is ported (2026-10-01) but uniting with the shadow is a debug key
+  (F8 / `POP_UNITED=1`) until the shadow and sword fighting exist (check_shadow, seg002).
+  The kid's blink while united (draw_objtable_item) isn't drawn. Verify the bridge in
+  rooms 2 and 13 against DOSBox.
 - **Grabbing after a short jump**: works headless (level 1 room 12, standing jump from
   col 7 with Shift pressed after take-off → hangs on col 3). The user saw it fail in the
   live game, probably because Right Shift wasn't mapped (fixed 2026-09-30). If it still

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-01 — Level 12's hidden bridge and uniting with the shadow
+
+- **Hidden floors** (check_on_floor's special event, seg006): on level 12, once the kid
+  has united with his shadow, stepping off the top row of room 2 (or of room 13 from
+  column 6) makes floor appear under him, this tile and the next, instead of a fall.
+- **united_with_shadow** (seg002 check_shadow, seg003 timers): uniting flashes white for
+  18 ticks, adds a hit point (add_life) and counts 42 ticks down to -1, which is what the
+  bridge waits for.
+- In the original the uniting happens when the kid sheathes his sword and walks into the
+  shadow; the shadow and sword fighting aren't ported, so for now **F8** (live game, level
+  12) or `POP_UNITED=1` (`--dump`) unites them. The kid's blinking while united
+  (draw_objtable_item) isn't drawn.
+- Not compared with DOSBox (no DOS files in this session).
+
 ## 2026-10-01 — Torches, potions and the sword as trobs; room entry; flash flicker
 
 - **Torches, potion bubbles and the sword's glint** run as animated tiles with the
