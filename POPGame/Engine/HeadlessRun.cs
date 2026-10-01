@@ -31,6 +31,7 @@ public static class HeadlessRun
     /// <summary>Renders one room of a level, for checking tile art away from the start.</summary>
     public static int Room(string outFile, int level, int room)
     {
+        Sim.Simulation.RandomSeed = 0;
         var sim = GameSetup.Build(level, out _);
         sim.Kid.Room = room;
         var renderer = new DosRenderer();
@@ -43,6 +44,11 @@ public static class HeadlessRun
     public static int Run(int level, string outDir, string script, int everyNth = 1)
     {
         Directory.CreateDirectory(outDir);
+
+        // A fixed random seed (torches, potions, the sword's glint, level 13's floors)
+        // so a dump repeats; POP_SEED picks another.
+        Sim.Simulation.RandomSeed =
+            uint.TryParse(Environment.GetEnvironmentVariable("POP_SEED"), out uint seed) ? seed : 0;
 
         var sim = GameSetup.Build(level, out _);
         var renderer = new DosRenderer();

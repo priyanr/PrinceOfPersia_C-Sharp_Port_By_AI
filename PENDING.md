@@ -20,6 +20,11 @@ Check each in DOSBox (or at least with `--dump`) and log what you find in HISTOR
 - **Sprite clipping**: facing right into a wall, climbing up under a floor, climbing the
   exit stairs. The demo must still match; the level-door wipe moved to layer 0.
 - **Death**: the impale/halve/fall animation plays out and Shift restarts.
+- **Torches / potions / sword glint** (trobs since 2026-10-01): flame frames random,
+  bubbles 1..7, glint every 40..103 ticks. **Level 13** rooms 23/16: the floor above falls.
+- **Chompers**: confirmed open/shut the right way round by the user (2026-10-01). The
+  start-up log's `draw tables:` lines say whether the EXE held the chomper tables at the
+  old offsets.
 - Climbing onto a ledge now goes behind the floor edge (confirmed by the user in the
   live game, 2026-09-30). Still check hanging and jumping past ledge edges
   (draw_other_overlay), and that the demo still matches (falls now redraw tiles over him).
@@ -29,7 +34,9 @@ Check each in DOSBox (or at least with `--dump`) and log what you find in HISTOR
   (need_level1_music); with no sound we stand up straight away.
 - Jumping through the mirror should release the kid's shadow (jump_through_mirror,
   seg003); needs other characters first. `KidEngine.JumpedThroughMirror` is set.
-- Level 12 phantom bridge (ONGROUND creates floor on the fly).
+- Level 12 phantom bridge (check_on_floor makes floor appear in rooms 2 and 13): the
+  original only does it once the kid has united with his shadow (united_with_shadow
+  < 0), so it needs the shadow first.
 - **Grabbing after a short jump**: works headless (level 1 room 12, standing jump from
   col 7 with Shift pressed after take-off → hangs on col 3). The user saw it fail in the
   live game, probably because Right Shift wasn't mapped (fixed 2026-09-30). If it still
@@ -40,20 +47,14 @@ Check each in DOSBox (or at least with `--dump`) and log what you find in HISTOR
   stone pillar with a dotted strip (images 92/93, the pillar tile) there; we draw the
   gate's white front post (image 49). It was already like this before the trobs port.
   ~1400 of the ~1500 pixels still differing in the demo's room 2.
-- The pickup flash lasts the whole tick; the original shows it for 2/60 s of each tick
-  (do_flash), so it flickers.
 
 ## Game features not in the DOS sim yet
 - Guards and sword fighting (level 1 guard in room 3). The sword can be picked up
   (`HasSword`) but not drawn or used.
-- Torch flames, potion bubbles and the sword glint animate from the tick; the original
-  runs them as trobs with prandom (animate_torch / animate_potion / animate_sword).
 - Sounds (none at all), so the feather fall lasts a fixed 225 ticks rather than until
   its sound ends.
 - "Press Button to Continue" is drawn with Raylib's font over the window, not in the
   original's status line, and there is no death music (so no wait for it).
-- Entering a room doesn't run anim_tile_modif / check_fall_flo (check_the_end); only
-  the chompers start.
 
 ## Housekeeping
 - `AGENTS.md` still describes the legacy Apple II engine.

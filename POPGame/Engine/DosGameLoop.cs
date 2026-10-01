@@ -34,6 +34,7 @@ public sealed class DosGameLoop
         var input = new InputState();
         var poll = new RaylibInput();
         double acc = 0;
+        int framesSinceTick = 0;
 
         while (!Raylib.WindowShouldClose())
         {
@@ -44,6 +45,7 @@ public sealed class DosGameLoop
             {
                 acc -= TickSeconds;
                 sim.Tick(input);
+                framesSinceTick = 0;
 
                 // A dead kid stays down until Shift or Enter (seg000: Kid.alive > 6).
                 bool restart = Raylib.IsKeyPressed(KeyboardKey.R)
@@ -54,7 +56,9 @@ public sealed class DosGameLoop
                     sim.LoadLevel(levels.Get(sim.LevelNumber), sim.LevelNumber);
             }
 
-            renderer.Draw(sim);
+            // The flash shows for 2/60 s of each tick (do_flash), so it flickers.
+            renderer.Draw(sim, showFlash: framesSinceTick < 2);
+            framesSinceTick++;
             UploadFrame(tex, renderer.Frame);
 
             Raylib.BeginDrawing();

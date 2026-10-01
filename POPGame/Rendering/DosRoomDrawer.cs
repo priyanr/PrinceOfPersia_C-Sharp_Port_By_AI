@@ -278,14 +278,14 @@ public sealed class DosRoomDrawer
     /// <summary>
     /// The modifier a tile is drawn with. BLUESPEC is already in the original's units
     /// (load_alter_mod runs at level load, <see cref="Dos.DosLevels"/>); walls get their
-    /// neighbour bits here, and torches animate from the tick.
+    /// neighbour bits here. Torches, potions and the sword animate through their
+    /// modifiers, as trobs (<see cref="Sim.Hazards"/>).
     /// </summary>
     private int AlteredMod(int room, int row, int col)
     {
         int spec = _level.GetSpec(room - 1, row, col);
         switch (RawTile(room, row, col))
         {
-            case Torch: case TorchWithDebris: return 0;
             case Wall:
             {
                 // Bit 7: "no blue" (a modifier of 1 in the level); bits 0-1: which
@@ -535,7 +535,7 @@ public sealed class DosRoomDrawer
                 break;
             case Torch:
             case TorchWithDebris:
-                Back_(Set.Flame, TorchFrame() + 1, _drawXh + 1, 0, _drawMainY - 40, BlitMode.NoTrans);
+                Back_(Set.Flame, _modLeft + 1, _drawXh + 1, 0, _drawMainY - 40, BlitMode.NoTrans);   // flames 1..9
                 break;
         }
     }
@@ -606,7 +606,7 @@ public sealed class DosRoomDrawer
                 }
                 int y = _drawMainY - (size << 2) - 14;
                 Back_(Set.Flame, 23, _drawXh + 3, 1, y, BlitMode.Black);
-                Fore_(Set.Flame, _t.PotionBubble[PotionFrame()], _drawXh + 3, 1, y, BlitMode.Mono, color);
+                Fore_(Set.Flame, _t.PotionBubble[_currMod & 7], _drawXh + 3, 1, y, BlitMode.Mono, color);
                 break;
             }
 
@@ -919,10 +919,4 @@ public sealed class DosRoomDrawer
         }
         return Math.Clamp(mod, 0, 11);
     }
-
-    /// <summary>Each torch runs the nine-frame flame loop from its own phase.</summary>
-    private int TorchFrame() => (_tick + _drawnCol * 3 + _drawnRow * 5) % 9;
-
-    /// <summary>Bubbles cycle through frames 1..7; frame 0 is "no bubble".</summary>
-    private int PotionFrame() => 1 + (_tick + _drawnCol) % 7;
 }

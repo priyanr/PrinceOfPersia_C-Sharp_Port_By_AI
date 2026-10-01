@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-01 — Torches, potions and the sword as trobs; room entry; flash flicker
+
+- **Torches, potion bubbles and the sword's glint** run as animated tiles with the
+  game's random numbers (seg007 start_anim_* / animate_torch / animate_potion /
+  animate_sword, prandom), instead of cycling from the tick counter. Each starts at a
+  random frame when the kid enters the room (anim_tile_modif), torches in the room to
+  the left's rightmost column included; torches pick random flame frames, the sword
+  glints after a random 40..103 ticks. The room drawer now draws them from their
+  modifiers.
+- **check_the_end** on entering a room: anim_tile_modif, start_chompers, and
+  **check_fall_flo**: level 13's rooms 23 and 16 set the floor of the room above falling,
+  each tile after a random delay.
+- `Simulation.RandomSeed`: clock-seeded in the live game, as the original; `--dump` and
+  `--room` use 0 (or `POP_SEED`) so dumps repeat.
+- **The pickup / hurt flash flickers**: the live game shows it for the first 2/60 s of
+  each tick (do_flash), not the whole tick. Dumps still show it on every image.
+- Not compared with DOSBox (no DOS files in this session).
+
 ## 2026-10-01 — Chomper drawn open/shut the wrong way round
 
 The user's recordings of level 4 room 22 (DOSBox vs ours) show the same 15-tick cycle,

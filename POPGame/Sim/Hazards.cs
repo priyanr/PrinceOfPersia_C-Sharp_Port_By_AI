@@ -52,6 +52,146 @@ public sealed class Hazards
     /// <summary>drawn_room: the room on screen (the kid's), which chompers keep running in.</summary>
     public int DrawnRoom { get; set; }
 
+    // ── prandom (seg009) ──────────────────────────────────────────────────────
+
+    private uint _randomSeed;
+
+    /// <summary>
+    /// random_seed. The original seeds it from the clock; the headless runner fixes it
+    /// so dumps repeat. (The room drawer's masonry PRNG is separate: the original saves
+    /// and restores the seed around it.)
+    /// </summary>
+    public void SeedRandom(uint seed) => _randomSeed = seed;
+
+    /// <summary>prandom: Microsoft C's LCG, top 16 bits, modulo max+1.</summary>
+    private int PRandom(int max)
+    {
+        _randomSeed = _randomSeed * 214013 + 2531011;
+        return (int)((_randomSeed >> 16) % (uint)(max + 1));
+    }
+
+    // ── entering a room (seg000 check_the_end) ────────────────────────────────
+
+    private const int TorchWithDebris = 30;
+
+    /// <summary>
+    /// anim_tile_modif (seg000): on entering a room its potions, torches and sword start
+    /// animating from a random frame, and so do the torches in the rightmost column of
+    /// the room to the left (they show in this one).
+    /// </summary>
+    public void AnimTileModif()
+    {
+        if (!ValidRoom(DrawnRoom)) return;
+        _currRoom = DrawnRoom;
+        for (int tilepos = 0; tilepos < Level.CellsPerScreen; ++tilepos)
+        {
+            switch (GetCurrTile(tilepos))
+            {
+                case (int)TileId.Flask: StartAnimPotion(DrawnRoom, tilepos); break;
+                case (int)TileId.Torch:
+                case TorchWithDebris: StartAnimTorch(DrawnRoom, tilepos); break;
+                case (int)TileId.Sword: StartAnimSword(DrawnRoom, tilepos); break;
+            }
+        }
+
+        int roomL = _level.Left(DrawnRoom);
+        for (int row = 0; row <= 2; row++)
+        {
+            int tile = GetTile(roomL, 9, row);
+            if (tile is (int)TileId.Torch or TorchWithDebris && ValidRoom(_currRoom))
+                StartAnimTorch(roomL, row * Coord.Cols + 9);
+        }
+    }
+
+    /// <summary>
+    /// check_fall_flo (seg000): on level 13, entering room 23 or 16 sets the floor of the
+    /// room above (tiles 22..27) falling, each after a random delay.
+    /// </summary>
+    public void CheckFallFlo()
+    {
+        if (_levelNumber != LooseTilesLevel || DrawnRoom is not (23 or 16)) return;
+        _currRoom = _level.Above(DrawnRoom);
+        if (!ValidRoom(_currRoom)) return;
+        for (_currTilepos = 22; _currTilepos <= 27; ++_currTilepos)
+            MakeLooseFall((byte)-(PRandom(0xFF) & 0x0F));
+    }
+
+    /// <summary>start_anim_torch.</summary>
+    private void StartAnimTorch(int room, int tilepos)
+    {
+        SetMod(room, tilepos, (byte)PRandom(8));
+        AddTrob(room, tilepos, 1);
+    }
+
+    /// <summary>start_anim_potion: bubbles from a random frame 1..7; the type stays in bits 3-7.</summary>
+    private void StartAnimPotion(int room, int tilepos)
+    {
+        SetMod(room, tilepos, (byte)((ModAt(room, tilepos) & 0xF8) | (PRandom(6) + 1)));
+        AddTrob(room, tilepos, 1);
+    }
+
+    /// <summary>start_anim_sword: a random wait before its first glint.</summary>
+    private void StartAnimSword(int room, int tilepos)
+    {
+        SetMod(room, tilepos, (byte)(PRandom(0xFF) & 0x1F));
+        AddTrob(room, tilepos, 1);
+    }
+
+    /// <summary>is_trob_in_drawn_room: a trob outside the drawn room stops.</summary>
+    private bool IsTrobInDrawnRoom()
+    {
+        if (_trob.Room == DrawnRoom) return true;
+        _trob.Type = -1;
+        return false;
+    }
+
+    /// <summary>
+    /// animate_torch: a random flame frame (get_torch_frame), while the torch is in the
+    /// drawn room or in the rightmost column of the room to its left.
+    /// </summary>
+    private void AnimateTorch()
+    {
+        if (_trob.Room == DrawnRoom || (_trob.Room == _level.Left(DrawnRoom) && _trob.Tilepos % 10 == 9))
+            _currModifier = (byte)GetTorchFrame(_currModifier);
+        else
+            _trob.Type = -1;
+    }
+
+    /// <summary>get_torch_frame: mostly a random frame 0..8, else the next one.</summary>
+    private int GetTorchFrame(int curr)
+    {
+        int next = PRandom(255);
+        if (next != curr)
+        {
+            if (next < 9) return next;
+            next = curr;
+        }
+        ++next;
+        if (next >= 9) next = 0;
+        return next;
+    }
+
+    /// <summary>animate_potion: the bubble steps through frames 1..7 (bubble_next_frame).</summary>
+    private void AnimatePotion()
+    {
+        if (_trob.Type < 0 || !IsTrobInDrawnRoom()) return;
+        int type = _currModifier & 0xF8;
+        int next = (_currModifier & 0x07) + 1;
+        if (next >= 8) next = 1;
+        _currModifier = (byte)(next | type);
+    }
+
+    /// <summary>
+    /// animate_sword: counts down to its glint (drawn on modifier 1), then waits a
+    /// random 40..103 ticks for the next.
+    /// </summary>
+    private void AnimateSword()
+    {
+        if (!IsTrobInDrawnRoom()) return;
+        --_currModifier;
+        if (_currModifier == 0) _currModifier = (byte)((PRandom(255) & 0x3F) + 0x28);
+    }
+
     // Level data these routines tune (SDLPoP's custom-> values for the DOS game).
     private const int LooseFloorDelay = 11;
     private const int LooseTilesLevel = 13;
@@ -133,6 +273,10 @@ public sealed class Hazards
         _currRoom = _trob.Room;
         switch ((TileId)GetCurrTile(_trob.Tilepos))
         {
+            case TileId.Torch:
+            case (TileId)TorchWithDebris: AnimateTorch(); break;
+            case TileId.Flask: AnimatePotion(); break;
+            case TileId.Sword: AnimateSword(); break;
             case TileId.PressPlate:
             case TileId.UPressPlate: AnimateButton(); break;
             case TileId.Spikes: AnimateSpike(); break;

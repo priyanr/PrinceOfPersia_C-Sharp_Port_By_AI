@@ -66,7 +66,12 @@ public sealed class DosRenderer
     /// <summary>World x units -> screen pixels.</summary>
     public static int ToPx(int x) => (x - Coord.ScrnLeft) * TileW / Coord.BlockWidth;
 
-    public void Draw(Simulation sim)
+    /// <param name="showFlash">
+    /// Whether this frame shows the tick's flash. do_flash holds it for 2/60 s and the
+    /// frame then carries on without it, so the live loop shows it only on the first
+    /// two 60 Hz frames after a tick; a dump (one image per tick) always shows it.
+    /// </param>
+    public void Draw(Simulation sim, bool showFlash = true)
     {
         Frame.Clear(0, 0, 0);
 
@@ -99,7 +104,7 @@ public sealed class DosRenderer
         DrawOps(_drawer.WipesFore);
         DrawOps(_drawer.Fore);
 
-        if (sim.Flash != 0) Flash(sim.Flash);
+        if (sim.Flash != 0 && showFlash) Flash(sim.Flash);
         if (sim.UpsideDown) FlipGameplay();
     }
 

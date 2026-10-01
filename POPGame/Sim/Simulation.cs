@@ -52,6 +52,7 @@ public sealed class Simulation
     {
         View = new RoomView(Level);
         _hazards = new Hazards(Level, LevelNumber) { Kid = Kid };
+        _hazards.SeedRandom(RandomSeed);
         _engine = new KidEngine(_seq, Tables, View, _kidImageSize, _hazards, LevelNumber)
         {
             StartRoom = Level.KidStartScrn,
@@ -72,8 +73,16 @@ public sealed class Simulation
     {
         if (Kid.Room == 0 || Kid.Room == _hazards.DrawnRoom) return;
         _hazards.DrawnRoom = Kid.Room;
+        _hazards.AnimTileModif();
         _hazards.StartChompers(Kid);
+        _hazards.CheckFallFlo();
     }
+
+    /// <summary>
+    /// random_seed for this level and on. The live game seeds it from the clock, as the
+    /// original does; the headless runner uses a fixed seed so dumps repeat.
+    /// </summary>
+    public static uint RandomSeed { get; set; } = (uint)Environment.TickCount;
 
     // Kid.alive once he is dead: 0 on the tick he dies, then one more each tick his
     // death frame (177 spiked, 178 chomped, 185 dead) is showing. -1 while alive.
