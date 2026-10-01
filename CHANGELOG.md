@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-01 — Chomper drawn open/shut the wrong way round
+
+The user's recordings of level 4 room 22 (DOSBox vs ours) show the same 15-tick cycle,
+but the original is open (small teeth top and bottom) for most of it and shut for ~3
+ticks, while ours showed a nearly shut blade most of the time and opened briefly. The
+cycle is right, so the frame tables were wrong: the chomper arrays were read at fixed
+offsets from the tile table that had never been checked (chompers didn't animate
+before). `DosDrawTables` now takes each chomper array (chomper_fram1 / _bot / _top /
+_y / _for) by its contents, SDLPoP's values, and logs at start-up
+(`draw tables: ...`) where it found them or that the fixed offset held something else.
+
 ## 2026-10-01 — Torch flames and potion bubbles at game speed
 
 Reported by the user: torches flickered far too fast. The flame and bubble frames were

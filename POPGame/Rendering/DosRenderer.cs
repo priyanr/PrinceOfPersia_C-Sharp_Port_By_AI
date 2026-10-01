@@ -48,6 +48,7 @@ public sealed class DosRenderer
         _env = EnvBank(0);
         _flame = new DosImageBank(DosGame.File("PRINCE.DAT"), 150);
         _tables = DosDrawTables.Load();
+        foreach (string note in _tables.Notes) Console.WriteLine("draw tables: " + note);
         _drawer = new DosRoomDrawer(_tables);
     }
 

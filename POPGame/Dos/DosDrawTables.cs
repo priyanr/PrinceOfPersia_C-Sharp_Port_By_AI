@@ -90,11 +90,15 @@ public sealed class DosDrawTables
         LooseLeft = Bytes(LooseLeftAt, 12);
         LooseRight = Bytes(LooseRightAt, 12);
         LooseBottom = Bytes(LooseBottomAt, 12);
-        ChomperFrame = Bytes(ChomperFrameAt, 8);
-        ChomperTop = Bytes(ChomperTopAt, 6);
-        ChomperBottom = Bytes(ChomperBottomAt, 6);
-        ChomperY = Bytes(ChomperYAt, 5);
-        ChomperFore = Bytes(ChomperForeAt, 6);
+        // The chomper arrays: the fixed offsets above were never checked (chompers did
+        // not animate until 2026-09-30, and then drew open and shut the wrong way round
+        // against a DOSBox recording of level 4). Find each by its contents instead,
+        // with SDLPoP's values (seg008) as the pattern.
+        ChomperFrame = Locate(image, t, ChomperFrameAt, [3, 2, 0, 1, 4, 3, 3, 0], "chomper_fram1");
+        ChomperBottom = Locate(image, t, ChomperBottomAt, [101, 102, 103, 104, 105, 0], "chomper_fram_bot");
+        ChomperTop = Locate(image, t, ChomperTopAt, [0, 0, 111, 112, 113, 0], "chomper_fram_top");
+        ChomperY = Locate(image, t, ChomperYAt, [0, 0, 0x25, 0x2F, 0x32], "chomper_fram_y");
+        ChomperFore = Locate(image, t, ChomperForeAt, [106, 107, 108, 109, 110, 0], "chomper_fram_for");
         SpikesLeft = Bytes(SpikesAt, 10);
         SpikesRight = Bytes(SpikesAt + 10, 10);
         SpikesFore = Bytes(SpikesAt + 20, 10);
@@ -111,6 +115,32 @@ public sealed class DosDrawTables
 
         if (Validate() is { } err)
             throw new InvalidDataException("PRINCE.EXE drawing tables: " + err);
+    }
+
+    /// <summary>What <see cref="Locate"/> found, for the start-up log.</summary>
+    public List<string> Notes { get; } = [];
+
+    /// <summary>
+    /// A table at its expected offset from the tile table if it holds the expected
+    /// values; otherwise the nearest place in the data block that does (logged); if
+    /// none, the expected values (logged too).
+    /// </summary>
+    private byte[] Locate(byte[] image, int tileTable, int expectedAt, byte[] expected, string name)
+    {
+        if (image.AsSpan(tileTable + expectedAt, expected.Length).SequenceEqual(expected))
+            return expected;
+
+        int best = -1;
+        for (int at = Math.Max(0, tileTable - 2048); at + expected.Length <= Math.Min(image.Length, tileTable + 4096); at++)
+        {
+            if (!image.AsSpan(at, expected.Length).SequenceEqual(expected)) continue;
+            if (best < 0 || Math.Abs(at - tileTable - expectedAt) < Math.Abs(best - tileTable - expectedAt)) best = at;
+        }
+        var found = image.AsSpan(tileTable + expectedAt, expected.Length).ToArray();
+        Notes.Add(best >= 0
+            ? $"{name}: tile table +{expectedAt} held [{string.Join(",", found)}]; found at +{best - tileTable}"
+            : $"{name}: not found in PRINCE.EXE (+{expectedAt} held [{string.Join(",", found)}]); using SDLPoP's values");
+        return expected;
     }
 
     public static DosDrawTables Load() =>
