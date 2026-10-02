@@ -84,8 +84,11 @@ public static class HeadlessRun
             written++;
 
             var k = sim.Kid;
+            var g = sim.Guard;
             Console.WriteLine($"  t{tick,3} keys={steps[tick],-5} rm{k.Room} x{k.X,3} y{k.Y,3} " +
-                              $"row{k.Row} col{k.Col} frame{k.Frame,3} act{(int)k.Action} seq{k.CurrentSeq}");
+                              $"row{k.Row} col{k.Col} frame{k.Frame,3} act{(int)k.Action} seq{k.CurrentSeq}" +
+                              $" hp{k.Hp}" +
+                              (g.Present ? $" | guard x{g.X,3} frame{g.Frame,3} act{(int)g.Action} seq{g.CurrentSeq} hp{g.Hp} sw{(g.SwordDrawn ? 1 : 0)}" : ""));
         }
 
         Console.WriteLine($"wrote {written} frames");

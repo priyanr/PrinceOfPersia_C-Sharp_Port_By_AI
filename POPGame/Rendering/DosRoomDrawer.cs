@@ -213,6 +213,8 @@ public sealed class DosRoomDrawer
                 }
             }
         }
+        // The last of redraw_needed_tiles: whatever is filed under tile -1 (hurt splashes).
+        Objects(255);
         _addTo = Back;
     }
 

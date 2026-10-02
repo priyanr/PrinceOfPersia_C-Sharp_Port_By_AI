@@ -20,20 +20,20 @@ public sealed class Simulation
     public int LevelNumber { get; private set; }
 
     private readonly SeqRunner _seq;
-    private readonly Func<FrameDef, (int W, int H)> _kidImageSize;
+    /// <summary>The kid's, the guard's and the sword's sprite sheets.</summary>
+    public CharSheets Sprites { get; }
     private KidEngine _engine = null!;
     private Hazards _hazards = null!;
 
-    /// <param name="kidImageSize">
-    /// Width and height of a frame's kid sprite (KID.DAT). Collision uses the sprite's
-    /// width, as the original's set_char_collision does.
+    /// <param name="sprites">
+    /// The sprite sheets. Collision uses a sprite's width, as the original's
+    /// set_char_collision does.
     /// </param>
-    public Simulation(DosTables tables, Level level, int levelNumber,
-                      Func<FrameDef, (int W, int H)> kidImageSize)
+    public Simulation(DosTables tables, Level level, int levelNumber, CharSheets sprites)
     {
         Tables = tables;
         _seq = new SeqRunner(tables);
-        _kidImageSize = kidImageSize;
+        Sprites = sprites;
         Level = level;
         LevelNumber = levelNumber;
         Setup();
@@ -50,13 +50,17 @@ public sealed class Simulation
 
     private void Setup()
     {
+        Sprites.SetLevel(LevelNumber, Tables);
         View = new RoomView(Level);
         _hazards = new Hazards(Level, LevelNumber) { Kid = Kid };
         _hazards.SeedRandom(RandomSeed);
-        _engine = new KidEngine(_seq, Tables, View, _kidImageSize, _hazards, LevelNumber)
+        _engine = new KidEngine(_seq, Tables, View, Sprites.Size, _hazards, LevelNumber)
         {
             StartRoom = Level.KidStartScrn,
         };
+        _engine.Kid = Kid;
+        // have_sword: the demo and every level from the second on start with the sword.
+        Kid.HasSword = LevelNumber == 0 || LevelNumber >= 2;
         _hazards.LooseFellOnKid = () => _engine.LooseFellOnKid(Kid, Effects);
         _seq.RowChanged = ch => _hazards.StartChompers(ch);
         _deadCounter = -1;
@@ -76,6 +80,7 @@ public sealed class Simulation
         _hazards.AnimTileModif();
         _hazards.StartChompers(Kid);
         _hazards.CheckFallFlo();
+        _engine.CheckShadow();
     }
 
     /// <summary>
@@ -100,6 +105,15 @@ public sealed class Simulation
 
     /// <summary>is_dead (seg006): showing a death frame.</summary>
     private static bool IsDeadFrame(int frame) => frame is >= 177 and <= 178 or 185;
+
+    /// <summary>The room's guard (Guard.Present is false when there is none).</summary>
+    public CharState Guard => _engine.Guard;
+
+    /// <summary>curr_guard_color: 0, or the guard's clothes colour 1..4.</summary>
+    public int GuardColor => _engine.GuardColor;
+
+    /// <summary>The kid has his sword drawn: the game runs slower while fighting (fight_speed 6 against 5).</summary>
+    public bool Fighting => Kid.SwordDrawn;
 
     /// <summary>The level's animated tiles and falling floor pieces.</summary>
     public Hazards Hazards => _hazards;
@@ -150,8 +164,12 @@ public sealed class Simulation
         // play_frame (seg000): falling pieces and animated tiles move first, then the
         // kid (whose frame ends with check_press / check_knock), then the room exit.
         int hp = Kid.Hp;
+        Kid.HpDelta = 0;
+        Guard.HpDelta = 0;
+        _engine.GuardFx.Clear();
         _hazards.DoMobs();
         _hazards.ProcessTrobs();
+        _engine.CheckCanGuardSeeKid();
         _engine.PlayKidFrame(Kid, input, Effects);
         if (!Kid.Alive)
         {
@@ -159,8 +177,12 @@ public sealed class Simulation
             if (_deadCounter < 0) _deadCounter = 0;
             else if (IsDeadFrame(Kid.Frame)) _deadCounter++;
         }
+        _engine.PlayGuardFrame();
+        _engine.CheckSwordHurting();
+        _engine.CheckSwordHurt();
         _engine.ExitRoom(Kid);
         CheckTheEnd();
+        _engine.CheckGuardFallout();
 
         Flash = 0;
         if (_engine.FlashTime != 0)
@@ -185,5 +207,12 @@ public sealed class Simulation
     public KidDrawInfo KidDraw(int leveldoorYBottom, int leveldoorRight) =>
         _engine.KidDraw(Kid, leveldoorYBottom, leveldoorRight);
 
-    public FrameDef KidFrame => Tables.Frames[Math.Clamp(Kid.Frame, 0, DosTables.FrameCount)];
+    public FrameDef KidFrame => FrameOf(Kid);
+
+    /// <summary>The frame a character is showing.</summary>
+    public FrameDef FrameOf(CharState ch) => Tables.Frames[Math.Clamp(ch.Frame, 0, DosTables.FrameCount)];
+
+    /// <summary>add_guard_to_objtable: how the guard is drawn (the same work as for the kid).</summary>
+    public KidDrawInfo GuardDraw(int leveldoorYBottom, int leveldoorRight) =>
+        _engine.KidDraw(Guard, leveldoorYBottom, leveldoorRight);
 }

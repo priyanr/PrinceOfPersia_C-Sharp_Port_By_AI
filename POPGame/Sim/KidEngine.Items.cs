@@ -113,7 +113,7 @@ public sealed partial class KidEngine
     /// <summary>proc_get_object: the get-item opcode of the pickup/drink sequence.</summary>
     private void ProcGetObject()
     {
-        if (_pickupObjType == 0) return;
+        if (_ch.CharId != CharIds.Kid || _pickupObjType == 0) return;
         if (_pickupObjType == -1)
         {
             _ch.HasSword = true;
@@ -164,7 +164,7 @@ public sealed partial class KidEngine
     public void LooseFellOnKid(CharState ch, SeqEffects fx)
     {
         _ch = ch;
-        _fx = fx;
+        _fx = _kidFx = fx;
         int frame = _ch.Frame;
         var action = _ch.Action;
         if (!((_levelNumber == 13 || frame < 5 || frame >= 15)

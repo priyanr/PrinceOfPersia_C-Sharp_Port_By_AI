@@ -11,6 +11,13 @@ public enum CharAction : byte
     Bumped       = 5,
     HangStraight = 6,
     Turn         = 7,
+    Hurt         = 99,    // actions_99_hurt: set on the victim by check_hurting, read by check_sword_hurt
+}
+
+/// <summary>Char.charid values (SDLPoP charid_*).</summary>
+public static class CharIds
+{
+    public const int Kid = 0, Shadow = 1, Guard = 2, Skeleton = 4, Mouse = 24;
 }
 
 /// <summary>Sequence ids, from SEQDATA.S. Only the ones the engine references are named.</summary>
@@ -61,7 +68,22 @@ public sealed class CharState
 
     public int Hp = 3, MaxHp = 3;
     public bool Alive = true;
-    public bool HasSword;
+    public bool HasSword;             // the kid has picked the sword up (have_sword)
+
+    /// <summary>
+    /// hitp_delta / guardhp_delta: hit points lost this tick (negative), 0 otherwise.
+    /// A hurt splash is drawn on a tick that has one.
+    /// </summary>
+    public int HpDelta;
+
+    public int CharId;                // Char.charid: CharId.Kid, Guard, ...
+    public bool SwordDrawn;           // Char.sword == sword_2_drawn (0 = sheathed)
+
+    /// <summary>
+    /// False for a guard that isn't in the level now (Guard.direction == dir_56_none):
+    /// no guard in the room, or it died and was cleared.
+    /// </summary>
+    public bool Present = true;
 
     public bool FacingRight => Face >= 0;
     public int FaceSign => Face < 0 ? -1 : 1;

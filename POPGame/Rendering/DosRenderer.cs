@@ -24,7 +24,6 @@ public sealed class DosRenderer
     public const int TileW = 32;
     public const int TileH = Coord.BlockHeight;   // 63
 
-    private readonly DosImageBank _kid;
     private DosImageBank _env;
     private int _envType;
     private readonly DosImageBank?[] _envBanks = new DosImageBank?[2];
@@ -44,7 +43,6 @@ public sealed class DosRenderer
 
     public DosRenderer()
     {
-        _kid = new DosImageBank(DosGame.File("KID.DAT"), 400);
         _env = EnvBank(0);
         _flame = new DosImageBank(DosGame.File("PRINCE.DAT"), 150);
         _tables = DosDrawTables.Load();
@@ -104,6 +102,7 @@ public sealed class DosRenderer
         DrawOps(_drawer.WipesFore);
         DrawOps(_drawer.Fore);
 
+        DrawHp(sim);
         if (sim.Flash != 0 && showFlash) Flash(sim.Flash);
         if (sim.UpsideDown) FlipGameplay();
     }
@@ -138,12 +137,48 @@ public sealed class DosRenderer
             if (topRow != row) redraw2.Add(GetTilepos(col + 1, topRow));
         }
 
-        var kd = sim.KidDraw(_drawer.LeveldoorYBottom, _drawer.LeveldoorRight);
-        if (!sim.KidFrame.IsBlank)
-            objs.Add(new MidObject(kd.ObjTilepos, kd.ObjY, false, () => DrawKid(sim, kd.Clip)));
-        kidDraw = kd with { Redraw2 = [.. kd.Redraw2, .. redraw2] };
+        // draw_people: the kid, then the guard; each with its hurt splash and sword.
+        var redraw2Chars = new List<int>();
+        var floorOverlay = new List<int>();
+        AddChar(sim, sim.Kid, objs, redraw2Chars, floorOverlay, kid: true);
+        if (sim.Guard.Present && sim.Guard.Room == room)
+            AddChar(sim, sim.Guard, objs, redraw2Chars, floorOverlay, kid: false);
+
+        kidDraw = new KidDrawInfo(ClipRect.Full, 0, 0, [.. redraw2Chars, .. redraw2], floorOverlay);
         return objs;
     }
+
+    /// <summary>
+    /// add_kid_to_objtable / add_guard_to_objtable, then the hurt splash (while the
+    /// character lost hit points this tick) and add_sword_to_objtable. The splash is filed
+    /// under tile -1 (drawn last); the sword under the character's tile.
+    /// </summary>
+    private void AddChar(Simulation sim, CharState ch, List<MidObject> objs, List<int> redraw2,
+                         List<int> floorOverlay, bool kid)
+    {
+        var f = sim.FrameOf(ch);
+        var info = kid
+            ? sim.KidDraw(_drawer.LeveldoorYBottom, _drawer.LeveldoorRight)
+            : sim.GuardDraw(_drawer.LeveldoorYBottom, _drawer.LeveldoorRight);
+        redraw2.AddRange(info.Redraw2);
+        floorOverlay.AddRange(info.FloorOverlay);
+
+        if (!f.IsBlank)
+            objs.Add(new MidObject(info.ObjTilepos, info.ObjY, false, () => DrawChar(sim, ch, f, info.Clip)));
+
+        if (ch.HpDelta < 0 && ch.Frame != 178)
+            objs.Add(new MidObject(SplashTilepos, info.ObjY, false, () => DrawSplash(sim, ch, f)));
+
+        if (SwordShown(ch, f))
+        {
+            var (id, dx, dy) = SwordTable[f.Sword & 0x3F];
+            if (id != 0xFF)
+                objs.Add(new MidObject(info.ObjTilepos, info.ObjY + dy, false, () => DrawSword(sim, ch, f, info.Clip)));
+        }
+    }
+
+    /// <summary>obj_tilepos = -1: drawn after everything filed under a tile.</summary>
+    private const int SplashTilepos = 255;
 
     private static int YToRowMod4(int y) => (y + 60) / 63 % 4 - 1;
 
@@ -339,24 +374,130 @@ public sealed class DosRenderer
         }
     }
 
-    private void DrawKid(Simulation sim, ClipRect c)
+    /// <summary>
+    /// draw_mid for a character: obj_x is in the original's 280-wide space and scales to
+    /// 320. Facing left the sprite's left edge is at obj_x; facing right the sprite is
+    /// mirrored and its right edge is there. Vertically y names the image's bottom row.
+    /// </summary>
+    private void DrawChar(Simulation sim, CharState ch, FrameDef f, ClipRect c)
     {
-        var ch = sim.Kid;
-        var f = sim.KidFrame;
-        if (f.IsBlank) return;
+        var bank = sim.Sprites.BankFor(f);
+        var img = bank?[f.Image + 1];       // frame images are 0-based, banks 1-based
+        if (bank is null || img is null) return;
 
-        var img = _kid[f.Image + 1];        // frame images are 0-based, banks 1-based
-        if (img is null) return;
-
-        // load_frame_to_obj + draw_mid (SDLPoP seg008): obj_x is in the original's
-        // 280-wide space and scales to 320. Facing left the sprite's left edge is at
-        // obj_x; facing right the sprite is mirrored and its right edge is there.
-        // Vertically y names the image's bottom row.
         int px = KidEngine.SpriteX(ch, f) * 320 / 280;
         if (ch.FacingRight) px -= img.Width;
         int py = ch.Y + f.Dy;
         // clip_char: walls, doortops and the floor above cut the sprite off.
-        Frame.Blit(img, _kid.Palette, px, py - img.Height + 1, ch.FacingRight,
+        Frame.Blit(img, bank.Palette, px, py - img.Height + 1, ch.FacingRight,
                    clip: (c.Left, c.Top, c.Right, c.Bottom));
+    }
+
+    /// <summary>
+    /// draw_hurt_splash: a burst where the character was hit. Frame 185 (dead) and the
+    /// fall frames 106..110 put it low, spiked (177) behind him, otherwise at chest height.
+    /// </summary>
+    private void DrawSplash(Simulation sim, CharState ch, FrameDef f)
+    {
+        bool kid = ch.CharId == CharIds.Kid;
+        var bank = kid ? sim.Sprites.Kid : sim.Sprites.Guard;
+        var img = bank?[kid ? 219 : 2];                 // image 218 / 1, banks being 1-based
+        if (bank is null || img is null) return;
+
+        int frame = ch.Frame;
+        int objX = KidEngine.SpriteX(ch, f);
+        int objY = f.Dy + ch.Y;
+        int dir = ch.FacingRight ? 1 : -1;
+        if (frame == 185 || frame is >= 106 and < 111)
+        {
+            objY += 4;
+            objX += 5 * dir;
+        }
+        else if (frame == 177)
+        {
+            objX += -5 * dir;
+        }
+        else
+        {
+            objY -= (kid ? 4 : 0) + 11;
+            objX += 5 * dir;
+        }
+
+        int px = objX * 320 / 280;
+        if (ch.FacingRight) px -= img.Width;
+        Frame.Blit(img, bank.Palette, px, objY - img.Height + 1, ch.FacingRight);
+    }
+
+    /// <summary>
+    /// add_sword_to_objtable: the sword is drawn while it is out, in the pickup and
+    /// sheathing frames (229..237), and for a living regular guard.
+    /// </summary>
+    private static bool SwordShown(CharState ch, FrameDef f)
+    {
+        if ((f.Sword & 0x3F) == 0) return false;
+        return ch.Frame is >= 229 and < 238 || ch.SwordDrawn || (ch.CharId == CharIds.Guard && ch.Alive);
+    }
+
+    /// <summary>
+    /// The sword (chtab 0): its x is already in screen pixels (draw_mid skips the 280 to
+    /// 320 scaling for it), offset forward by the table's dx, and its y by dy.
+    /// </summary>
+    private void DrawSword(Simulation sim, CharState ch, FrameDef f, ClipRect c)
+    {
+        var bank = sim.Sprites.Sword;
+        var (id, dx, dy) = SwordTable[f.Sword & 0x3F];
+        var img = bank?[id + 1];
+        if (bank is null || img is null) return;
+
+        int px = KidEngine.SpriteX(ch, f) * 320 / 280 + (ch.FacingRight ? dx : -dx);
+        if (ch.FacingRight) px -= img.Width;
+        int py = ch.Y + f.Dy + dy;
+        Frame.Blit(img, bank.Palette, px, py - img.Height + 1, ch.FacingRight,
+                   clip: (c.Left, c.Top, c.Right, c.Bottom));
+    }
+
+    // sword_tbl (SDLPoP seg006, data:1712): image id (0xFF none), dx, dy per frame's sword
+    // number. SDLPoP's copy; it has not been located in PRINCE.EXE yet.
+    private static readonly (byte Id, sbyte Dx, sbyte Dy)[] SwordTable =
+    [
+        (255, 0, 0), (0, 0, -9), (5, -9, -29), (1, 7, -25), (2, 17, -26), (6, 7, -14), (7, 0, -5),
+        (3, 17, -16), (4, 16, -19), (30, 12, -9), (8, 13, -34), (9, 7, -25), (10, 10, -16),
+        (11, 10, -11), (12, 22, -21), (13, 28, -23), (14, 13, -35), (15, 0, -38), (16, 0, -29),
+        (17, 21, -19), (18, 14, -23), (19, 21, -22), (19, 22, -23), (17, 7, -13), (17, 15, -18),
+        (7, 0, -8), (1, 7, -27), (28, 14, -28), (8, 7, -27), (4, 6, -23), (4, 9, -21), (10, 11, -18),
+        (13, 24, -23), (13, 19, -23), (13, 21, -23), (20, 7, -32), (21, 14, -32), (22, 14, -31),
+        (23, 14, -29), (24, 28, -28), (25, 28, -28), (26, 21, -25), (27, 14, -22), (255, 14, -25),
+        (255, 21, -25), (29, 0, -16), (8, 8, -37), (31, 14, -24), (32, 14, -24), (33, 7, -14),
+        (8, 8, -37),
+    ];
+
+    /// <summary>
+    /// draw_hp: the hit points along the bottom of the screen, the kid's from the left
+    /// and a guard's from the right. One left blinks (the original's rem_tick &amp; 1).
+    /// </summary>
+    private void DrawHp(Simulation sim)
+    {
+        var kid = sim.Kid;
+        var kidBank = sim.Sprites.Kid;
+        var full = kidBank[217];
+        var empty = kidBank[218];
+        for (int i = 0; i < kid.MaxHp; i++)
+        {
+            bool isFull = i < kid.Hp;
+            if (kid.Hp == 1 && i == 0 && sim.LevelNumber != 15) isFull = (sim.TickCount & 1) != 0;
+            var img = isFull ? full : empty;
+            if (img is not null) Frame.Blit(img, kidBank.Palette, i * 7, 194, false, mode: BlitMode.NoTrans);
+        }
+
+        var g = sim.Guard;
+        var guardBank = sim.Sprites.Guard;
+        if (!g.Present || guardBank is null || guardBank[1] is not { } gimg) return;
+        if (g.CharId is CharIds.Skeleton or CharIds.Mouse) return;
+        if (g.CharId == CharIds.Shadow && sim.LevelNumber != 12) return;
+        for (int i = 0; i < g.Hp; i++)
+        {
+            if (g.Hp == 1 && (sim.TickCount & 1) == 0) break;
+            Frame.Blit(gimg, guardBank.Palette, 314 - i * 7, 194, false, mode: BlitMode.NoTrans);
+        }
     }
 }

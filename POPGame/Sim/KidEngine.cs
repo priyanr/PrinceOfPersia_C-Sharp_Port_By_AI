@@ -65,7 +65,8 @@ public sealed partial class KidEngine
     /// </summary>
     public void PlayKidFrame(CharState ch, InputState input, SeqEffects fx)
     {
-        _ch = ch;
+        Select(ch, Guard);
+        _kidFx = fx;
         _fx = fx;
 
         Timers();
@@ -82,6 +83,7 @@ public sealed partial class KidEngine
         LoadFrameToObj();
         LoadFramDetCol();
         SetCharCollision();
+        BumpIntoOpponent();
         CheckCollisions();
         CheckBumped();
         CheckGatePush();
@@ -199,14 +201,19 @@ public sealed partial class KidEngine
         PlaySeq();
     }
 
-    /// <summary>exit_room (seg002): move the kid to the next room once he leaves this one.</summary>
+    /// <summary>
+    /// exit_room (seg002): move the kid to the next room once he leaves this one, and
+    /// settle what the guard does about it (follow him or stay behind).
+    /// </summary>
     public void ExitRoom(CharState ch)
     {
-        _ch = ch;
+        Select(ch, Guard);
         if (ch.Room == 0) return;
         LoadFrameToObj();
         SetCharCollision();
-        LeaveRoom();
+        int dir = LeaveRoom();
+        if (dir < 0) return;
+        ExitRoomGuard(dir);
     }
 
     /// <summary>
@@ -216,8 +223,10 @@ public sealed partial class KidEngine
     /// </summary>
     public void StartPos(CharState ch, SeqEffects fx, int room, int block, int startFace, bool fallingEntry)
     {
-        _ch = ch;
-        _fx = fx;
+        Kid = ch;
+        ResetFight();
+        Select(ch, Guard);
+        _kidFx = _fx = fx;
         ch.Room = room;
         ch.Col = block % Coord.Cols;
         ch.Row = block / Coord.Cols;
@@ -243,6 +252,11 @@ public sealed partial class KidEngine
     private void PlaySeq()
     {
         _seq.Animate(_ch, _fx, _isFeatherFall != 0);
+        if (_fx.AlertGuard)
+        {
+            _isGuardNotice = true;      // sound opcodes: footsteps and bumps are heard
+            _fx.AlertGuard = false;
+        }
         if (_fx.DrankPotion)
         {
             _fx.DrankPotion = false;
@@ -444,7 +458,7 @@ public sealed partial class KidEngine
     }
 
     /// <summary>leave_room (seg002).</summary>
-    private void LeaveRoom()
+    private int LeaveRoom()
     {
         int chary = _ch.Y;
         int frame = _ch.Frame;
@@ -463,23 +477,24 @@ public sealed partial class KidEngine
         else if (frame is >= 135 and < 150 or >= 110 and < 120 or >= 150 and < 163 or >= 166 and < 169
                  || action == CharAction.Turn)
         {
-            return;
+            return -1;
         }
         else if (!_ch.FacingRight)
         {
             if (_charXLeft <= 54) dir = 0;
             else if (_charXLeft >= 198) dir = 1;
-            else return;
+            else return -1;
         }
         else
         {
             GetTile(_ch.Room, 9, _ch.Row);
             if (_currTile2 is not (TileId.PanelWF or TileId.PanelWOF) && _charXRight >= 201) dir = 1;
             else if (_charXRight <= 57) dir = 0;
-            else return;
+            else return -1;
         }
 
         GotoOtherRoom(dir);
+        return dir;
     }
 
     /// <summary>goto_other_room (seg002).</summary>

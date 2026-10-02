@@ -29,7 +29,7 @@ public sealed partial class KidEngine
 
         if (DemoMode)
         {
-            DoAutoMoves();
+            DoDemo();
             Control();
             return;
         }
@@ -73,7 +73,31 @@ public sealed partial class KidEngine
 
     private int _demoTime, _demoIndex;
 
-    /// <summary>do_auto_moves (seg002). (The sword fight that follows is not ported.)</summary>
+    /// <summary>
+    /// do_demo (seg006): after the guard dies the kid runs for the exit; with his sword
+    /// drawn he is steered by the guard AI (skill 10); else the move table drives him.
+    /// </summary>
+    private void DoDemo()
+    {
+        if (_demoCheckpoint)
+        {
+            _controlShift2 = _controlForward = ReleaseArrows();
+            _controlForward = Held;
+            _controlX = -1;
+        }
+        else if (_ch.SwordDrawn)
+        {
+            _guardSkill = 10;
+            AutocontrolOpponent();
+            _guardSkill = 11;
+        }
+        else
+        {
+            DoAutoMoves();
+        }
+    }
+
+    /// <summary>do_auto_moves (seg002).</summary>
     private void DoAutoMoves()
     {
         if (_demoTime >= 0xFE) return;
@@ -165,6 +189,8 @@ public sealed partial class KidEngine
         }
 
         if (_ch.Action is CharAction.Bumped or CharAction.InFreefall) ReleaseArrows();
+        else if (_ch.SwordDrawn) ControlWithSword();
+        else if (_ch.CharId >= CharIds.Guard) ControlGuardInactive();
         else if (frame == 15 || frame is >= 50 and < 53) ControlStanding();
         else if (frame == 48) ControlTurning();
         else if (frame < 4) ControlStartrun();
@@ -189,11 +215,57 @@ public sealed partial class KidEngine
         }
     }
 
-    /// <summary>control_standing. (Drawing the sword to fight is not ported.)</summary>
+    /// <summary>control_standing.</summary>
     private void ControlStanding()
     {
         if (_controlShift2 == Held && _controlShift && CheckGetItem()) return;
-        if (_controlShift)
+        if (_ch.CharId != CharIds.Kid && _controlDown == Held && _controlForward == Held)
+        {
+            DrawSword();
+            return;
+        }
+
+        // loc_6213: ignore the shift key (it is down, but the kid isn't to step carefully).
+        bool ignoreShift = false;
+        if (Kid.HasSword)
+        {
+            if (_offguard && !_controlShift)
+            {
+                ignoreShift = true;
+            }
+            else if (CanGuardSeeKid >= 2)
+            {
+                int distance = CharOppDist();
+                if (distance >= -10 && distance < 90)
+                {
+                    _holdingSword = true;
+                    if (Below(distance, unchecked((ushort)-6)))
+                    {
+                        if (_opp.CharId == CharIds.Shadow
+                            && (_opp.Action == CharAction.InMidair || (_opp.Frame >= 107 && _opp.Frame < 118)))
+                        {
+                            _offguard = false;
+                        }
+                        else
+                        {
+                            DrawSword();
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        BackPressed();
+                        return;
+                    }
+                }
+            }
+            else
+            {
+                _offguard = false;
+            }
+        }
+
+        if (_controlShift && !ignoreShift)
         {
             if (_controlBackward == Held) BackPressed();
             else if (_controlUp == Held) UpPressed();
@@ -282,11 +354,28 @@ public sealed partial class KidEngine
         _controlDown = ReleaseArrows();
     }
 
-    /// <summary>back_pressed.</summary>
+    /// <summary>
+    /// back_pressed: turn around. A kid with a sword, facing away from a guard who has
+    /// come up behind him, draws it as he turns.
+    /// </summary>
     private void BackPressed()
     {
         _controlBackward = ReleaseArrows();
-        StartSeq(Sim.Seq.Turn);
+        int seq;
+        if (!Kid.HasSword
+            || CanGuardSeeKid < 2
+            || CharOppDist() > 0
+            || DistanceToEdgeWeight() < 2)
+        {
+            seq = Sim.Seq.Turn;
+        }
+        else
+        {
+            _ch.SwordDrawn = true;
+            _offguard = false;
+            seq = SeqTurnDrawSword;
+        }
+        StartSeq(seq);
     }
 
     /// <summary>forward_pressed: near a wall, take a careful step instead of running.</summary>

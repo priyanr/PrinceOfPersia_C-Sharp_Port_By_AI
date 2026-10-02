@@ -96,6 +96,7 @@ public sealed partial class KidEngine
     private void StartFall()
     {
         int frame = _ch.Frame;
+        _ch.SwordDrawn = false;
         _ch.Row++;
         _hazards.StartChompers(_ch);
         _fallFrame = frame;
@@ -113,9 +114,32 @@ public sealed partial class KidEngine
         }
         else if (frame is >= 150 and < 180)                         // with sword
         {
-            if (!_ch.FacingRight && DistanceToEdgeWeight() <= 7)
-                _ch.X = _ch.DxForward(-5);
-            seq = Seq.FightFall;
+            if (_ch.CharId == CharIds.Guard)
+            {
+                if (_ch.Row == 3 && _ch.Col == 10)
+                {
+                    ClearChar();
+                    return;
+                }
+                if (_ch.FallX < 0)
+                {
+                    seq = SeqGuardPushedOffLedge;
+                    if (!_ch.FacingRight && DistanceToEdgeWeight() <= 7)
+                        _ch.X = _ch.DxForward(-5);
+                }
+                else
+                {
+                    _droppedOut = false;
+                    seq = SeqGuardFall;                             // fall after forwarding with sword
+                }
+            }
+            else
+            {
+                _droppedOut = true;
+                if (!_ch.FacingRight && DistanceToEdgeWeight() <= 7)
+                    _ch.X = _ch.DxForward(-5);
+                seq = Seq.FightFall;                                // fall after backing with sword
+            }
         }
         else seq = Seq.StepFall;
 
@@ -261,35 +285,74 @@ public sealed partial class KidEngine
         }
 
         int seq;
+        bool soft = false;
         if (_ch.FallY < 22)
         {
-            seq = Seq.SoftLand;
+            soft = true;                                    // fell one row
         }
         else if (_ch.FallY < 33)
         {
-            seq = TakeHp(1) ? Seq.HardLand : Seq.MedLand;
+            // Fell two rows: a shadow lands like a short fall, a guard dies, the kid (or a
+            // skeleton, which is a bug of the original's) loses a hit point.
+            if (_ch.CharId == CharIds.Shadow) soft = true;
+            else if (_ch.CharId == CharIds.Guard)
+            {
+                TakeHp(100);
+                seq = Seq.HardLand;
+                goto done;
+            }
         }
         else
         {
             TakeHp(100);
             seq = Seq.HardLand;
+            goto done;
         }
 
+        if (soft)
+        {
+            if (_ch.CharId >= CharIds.Guard || _ch.SwordDrawn)
+            {
+                _ch.SwordDrawn = true;
+                seq = SeqGuardActiveAfterFall;              // stand active after landing
+            }
+            else seq = Seq.SoftLand;
+            if (_ch.CharId == CharIds.Kid) _isGuardNotice = true;
+        }
+        else if (TakeHp(1))
+        {
+            seq = Seq.HardLand;                             // dead: that was the last hit point
+        }
+        else
+        {
+            _isGuardNotice = true;
+            seq = Seq.MedLand;
+        }
+
+    done:
         _seq.Start(_ch, seq);
         PlaySeq();
         _ch.FallY = 0;
     }
 
-    /// <summary>take_hp: returns true when this killed him.</summary>
+    /// <summary>
+    /// take_hp: returns true when this killed him. The kid is dead at once; a guard (whose
+    /// hit points play_guard checks next frame) just runs out of them.
+    /// </summary>
     private bool TakeHp(int count)
     {
         if (count >= _ch.Hp)
         {
+            _ch.HpDelta = -_ch.Hp;
             _ch.Hp = 0;
-            _ch.Alive = false;
-            _fx.Died = true;
+            if (_ch.CharId == CharIds.Kid)
+            {
+                _ch.Alive = false;
+                _fx.Died = true;
+            }
             return true;
         }
+        _ch.HpDelta = -count;
         _ch.Hp -= count;
         return false;
     }
@@ -425,14 +488,14 @@ public sealed partial class KidEngine
     /// <summary>check_bumped_look_left.</summary>
     private void CheckBumpedLookLeft()
     {
-        if (!_ch.FacingRight && IsObstacleAtCol(_bumpColRightOfWall))
+        if ((_ch.SwordDrawn || !_ch.FacingRight) && IsObstacleAtCol(_bumpColRightOfWall))
             Bumped(GetRightWallXpos(_currRoom, _tileCol, _tileRow) - _charXLeftColl, pushLeft: false);
     }
 
     /// <summary>check_bumped_look_right.</summary>
     private void CheckBumpedLookRight()
     {
-        if (_ch.FacingRight && IsObstacleAtCol(_bumpColLeftOfWall))
+        if ((_ch.SwordDrawn || _ch.FacingRight) && IsObstacleAtCol(_bumpColLeftOfWall))
             Bumped(GetLeftWallXpos(_currRoom, _tileCol, _tileRow) - _charXRightColl, pushLeft: true);
     }
 
@@ -455,7 +518,7 @@ public sealed partial class KidEngine
         if (_currTile2 == TileId.Flask) return false;
         if (_currTile2 == TileId.Gate && !CanBumpIntoGate()) return false;
         if (_currTile2 == TileId.Slicer && Modif() != RoomView.SlicerExtended) return false;
-        if (_currTile2 == TileId.Mirror && _ch.Frame is >= 39 and < 44 && !_ch.FacingRight)
+        if (_currTile2 == TileId.Mirror && _ch.CharId == CharIds.Kid && _ch.Frame is >= 39 and < 44 && !_ch.FacingRight)
         {
             SetModif(0x56);                 // the mirror is jumped through
             JumpedThroughMirror = true;
@@ -505,7 +568,7 @@ public sealed partial class KidEngine
             GetTile(_currRoom, _tileCol, _tileRow);
         }
 
-        if (TileIsFloor(_currTile2)) BumpedFloor();
+        if (TileIsFloor(_currTile2)) BumpedFloor(pushLeft);
         else BumpedFall();
     }
 
@@ -521,13 +584,14 @@ public sealed partial class KidEngine
             PlaySeq();
         }
         _fx.SmackWall = true;
+        _isGuardNotice = true;
     }
 
     /// <summary>bumped_floor.</summary>
-    private void BumpedFloor()
+    private void BumpedFloor(bool pushLeft)
     {
         // Unsigned: a kid below the floor line also counts as "too high to stand".
-        if ((ushort)(Coord.FloorY(_ch.Row) - (byte)_ch.Y) >= 15)
+        if (!_ch.SwordDrawn && (ushort)(Coord.FloorY(_ch.Row) - (byte)_ch.Y) >= 15)
         {
             BumpedFall();
             return;
@@ -541,11 +605,30 @@ public sealed partial class KidEngine
         }
 
         _ch.FallY = 0;
-        int frame = _ch.Frame;
-        bool hard = frame is 24 or 25 or >= 40 and < 43 or >= 102 and < 107;
-        _seq.Start(_ch, hard ? Seq.HardBump : Seq.Bump);
+        if (!_ch.Alive) return;
+
+        int seq;
+        if (_ch.SwordDrawn)
+        {
+            if (pushLeft == !_ch.FacingRight)               // push_direction == Char.direction
+            {
+                StartSeq(SeqBumpForwardWithSword);          // pushed forward with sword
+                PlaySeq();
+                _ch.X = _ch.DxForward(1);
+                return;
+            }
+            seq = SeqPushedBackWithSword;
+        }
+        else
+        {
+            int frame = _ch.Frame;
+            bool hard = frame is 24 or 25 or >= 40 and < 43 or >= 102 and < 107;
+            seq = hard ? Seq.HardBump : Seq.Bump;
+        }
+        _seq.Start(_ch, seq);
         PlaySeq();
         _fx.SmackWall = true;
+        _isGuardNotice = true;
     }
 
     /// <summary>check_gate_push: a closing gate shoves a standing kid out from under it.</summary>
