@@ -91,6 +91,35 @@ public sealed class DosTables
         Array.Copy(exe, SeqBytecodeBase, Seq, 0, Math.Min(seqLen, exe.Length - SeqBytecodeBase));
     }
 
+    // ── guards (SDLPoP custom options; the originals sit in PRINCE.EXE's data segment) ──
+
+    public const int GuardSkills = 12;
+
+    // SDLPoP's defaults, which are the DOS game's own values. They are not read from
+    // PRINCE.EXE yet (SDLPoP lists the data-segment offsets per version; which one this
+    // install is has to be established with the real file) -- see PENDING.md.
+    private static readonly ushort[] DefStrikeProb   = [61, 100, 61, 61, 61, 40, 100, 220, 0, 48, 32, 48];
+    private static readonly ushort[] DefRestrikeProb = [0, 0, 0, 5, 5, 175, 16, 8, 0, 255, 255, 150];
+    private static readonly ushort[] DefBlockProb    = [0, 150, 150, 200, 200, 255, 200, 250, 0, 255, 255, 255];
+    private static readonly ushort[] DefImpBlockProb = [0, 61, 61, 100, 100, 145, 100, 250, 0, 145, 255, 175];
+    private static readonly ushort[] DefAdvProb      = [255, 200, 200, 200, 255, 255, 200, 0, 0, 255, 100, 100];
+    private static readonly ushort[] DefRefracTimer  = [16, 16, 16, 16, 8, 8, 8, 8, 0, 8, 0, 0];
+    private static readonly ushort[] DefExtraStrength = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0];
+    private static readonly byte[] DefGuardHp = [4, 3, 3, 3, 3, 4, 5, 4, 4, 5, 5, 5, 4, 6, 0, 0];
+    private static readonly short[] DefGuardType = [0, 0, 0, 2, 0, 0, 1, 0, 0, 0, 0, 0, 4, 3, -1, -1];
+
+    public ushort[] StrikeProb { get; private set; } = DefStrikeProb;
+    public ushort[] RestrikeProb { get; private set; } = DefRestrikeProb;
+    public ushort[] BlockProb { get; private set; } = DefBlockProb;
+    public ushort[] ImpBlockProb { get; private set; } = DefImpBlockProb;
+    public ushort[] AdvProb { get; private set; } = DefAdvProb;
+    public ushort[] RefracTimer { get; private set; } = DefRefracTimer;
+    public ushort[] ExtraStrength { get; private set; } = DefExtraStrength;
+    /// <summary>tbl_guard_hp per level 0..15.</summary>
+    public byte[] GuardHp { get; private set; } = DefGuardHp;
+    /// <summary>tbl_guard_type per level: -1 none, 0 guard, 1 fat, 2 skeleton, 3 vizier, 4 shadow.</summary>
+    public short[] GuardType { get; private set; } = DefGuardType;
+
     public static DosTables Load() => new(DosGame.File("PRINCE.EXE"));
 
     /// <summary>

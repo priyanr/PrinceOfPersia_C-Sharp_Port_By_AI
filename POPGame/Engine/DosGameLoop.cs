@@ -14,7 +14,8 @@ namespace POPGame.Engine;
 public sealed class DosGameLoop
 {
     private const int Scale = 3;
-    private const double TickSeconds = 1.0 / 12.0;   // the original runs at ~12 fps
+    private const double TickSeconds = 1.0 / 12.0;        // the original runs at ~12 fps
+    private const double FightTickSeconds = 1.0 / 10.0;   // slower while the kid has his sword out
 
     private readonly int _startLevel;
 
@@ -45,9 +46,9 @@ public sealed class DosGameLoop
             if (Raylib.IsKeyPressed(KeyboardKey.F8)) sim.UniteWithShadow();
 
             acc += Raylib.GetFrameTime();
-            while (acc >= TickSeconds)
+            while (acc >= (sim.Fighting ? FightTickSeconds : TickSeconds))
             {
-                acc -= TickSeconds;
+                acc -= sim.Fighting ? FightTickSeconds : TickSeconds;
                 sim.Tick(input);
                 framesSinceTick = 0;
 
@@ -99,7 +100,7 @@ public sealed class DosGameLoop
     private static void DrawDebug(Simulation sim)
     {
         var k = sim.Kid;
-        Raylib.DrawText($"HP {new string('|', Math.Max(0, k.Hp))}   level {sim.LevelNumber}   room {k.Room}" +
+        Raylib.DrawText($"level {sim.LevelNumber}   room {k.Room}" +
                         (sim.LevelNumber == 12 ? (sim.UnitedWithShadow != 0 ? "   united" : "   F8 = unite with shadow") : ""),
                         6, 6, 20, Color.Red);
         if (sim.ShowPressButton)
@@ -110,7 +111,7 @@ public sealed class DosGameLoop
         }
         else
         {
-            Raylib.DrawText("arrows move/jump/crouch   shift = careful step   R = restart level",
+            Raylib.DrawText("arrows move/jump/crouch   shift = careful step / strike   up = parry   down = sheathe   R = restart",
                             6, DosRenderer.ScreenH * Scale - 26, 16, Color.DarkGray);
         }
         Raylib.DrawText($"x{k.X} y{k.Y} row{k.Row} col{k.Col} frame{k.Frame} act{(int)k.Action} seq{k.CurrentSeq}",
@@ -130,9 +131,7 @@ public static class GameSetup
 
         levels = DosLevels.Load();
 
-        // Collision uses the width of the kid's sprite, as set_char_collision does.
-        var kid = new DosImageBank(DosGame.File("KID.DAT"), 400);
-        return new Simulation(tables, levels.Get(level), level,
-            f => kid[f.Image + 1] is { } img ? (img.Width, img.Height) : (0, 0));
+        // Collision uses the width of a character's sprite, as set_char_collision does.
+        return new Simulation(tables, levels.Get(level), level, new CharSheets());
     }
 }

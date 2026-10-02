@@ -78,7 +78,9 @@ Dos/        DosGame, DatFile, DatImage, DosImageBank, DosTables, ExePack,
 Sim/        Coord, CharState (+CharAction, Seq ids), SeqRunner (play_seq / ANIMCHAR),
             RoomView, KidEngine (SDLPoP port: .cs frame order/tiles/room exit,
             .Physics.cs falls/landing/grab/wall collisions, .Control.cs controls,
-            .Items.cs sword/potions, .Clip.cs clip_char), Hazards (seg007 port: trobs = plates, gates,
+            .Items.cs sword/potions, .Clip.cs clip_char,
+            .Fight.cs guard + sword fight: control_with_sword, autocontrol_guard,
+            hurt_by_sword, enter/leave_guard), Hazards (seg007 port: trobs = plates, gates,
             exit door, loose floors, spikes; mobs = falling floor pieces;
             check_press, check_knock), Simulation
 Rendering/  Framebuffer (320x200), DosRoomDrawer (DRAW_ROOM port), DosRenderer
@@ -88,10 +90,11 @@ Data/       Level, TileId
 All drawing goes through `Framebuffer`, so live game and dumps are pixel-identical.
 
 **Per tick** (SDLPoP play_frame, in `Simulation.Tick`): `Hazards.DoMobs` →
-`ProcessTrobs` → `KidEngine.PlayKidFrame` (control picks a sequence → play_seq →
+`ProcessTrobs` → `check_can_guard_see_kid` → `KidEngine.PlayKidFrame` (control picks a sequence → play_seq →
 fall_accel/fall_speed → set_char_collision → check_collisions / check_bumped /
 check_gate_push → check_action (floor, fall, land, grab) → check_press →
-check_spike_below → check_knock) → exit_room. `KidEngine` keeps SDLPoP's routine names and shared globals
+check_spike_below → check_knock) → `PlayGuardFrame` → check_sword_hurting / check_sword_hurt → exit_room
+→ check_the_end (enter_guard) → check_guard_fallout. `KidEngine` keeps SDLPoP's routine names and shared globals
 (`curr_tile2`, `tile_col`, latched controls), so each method can be checked against
 seg002/004/005/006. States are identified by **action + frame**, not action alone.
 Sequences chain themselves via `goto`, so control only chooses entry points.

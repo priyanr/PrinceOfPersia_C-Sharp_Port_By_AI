@@ -64,7 +64,7 @@ public sealed class Hazards
     public void SeedRandom(uint seed) => _randomSeed = seed;
 
     /// <summary>prandom: Microsoft C's LCG, top 16 bits, modulo max+1.</summary>
-    private int PRandom(int max)
+    public int PRandom(int max)
     {
         _randomSeed = _randomSeed * 214013 + 2531011;
         return (int)((_randomSeed >> 16) % (uint)(max + 1));

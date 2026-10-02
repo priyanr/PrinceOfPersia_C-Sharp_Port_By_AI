@@ -36,12 +36,16 @@ public class Level
     public int SwordStartScrn;
     public int SwordStartBlock;
 
+    // The guards (level.guards_* in SDLPoP), per screen. Live: leave_guard writes them
+    // back when the kid leaves a room, and Reset() restores the level's own.
+    // Block is the tile 0..29 (>= 30 = none), Face 0xFF = left, Prog is the skill.
     public byte[] GdStartBlock = new byte[NumScreens];
     public byte[] GdStartFace  = new byte[NumScreens];
     public byte[] GdStartX     = new byte[NumScreens];
     public byte[] GdStartSeqL  = new byte[NumScreens];
     public byte[] GdStartProg  = new byte[NumScreens];
     public byte[] GdStartSeqH  = new byte[NumScreens];
+    public byte[] GdStartColor = new byte[NumScreens];
 
     // --- Cell accessors (0-indexed screen) ---
     public TileId GetTileId(int screen0, int row, int col)
@@ -115,16 +119,7 @@ public class Level
         lv.SwordStartScrn  = lv.InfoRaw[68];
         lv.SwordStartBlock = lv.InfoRaw[69];
 
-        const int gdBase = 71;
-        for (int i = 0; i < NumScreens; i++)
-        {
-            lv.GdStartBlock[i] = lv.InfoRaw[gdBase +   0 + i];
-            lv.GdStartFace [i] = lv.InfoRaw[gdBase +  24 + i];
-            lv.GdStartX    [i] = lv.InfoRaw[gdBase +  48 + i];
-            lv.GdStartSeqL [i] = lv.InfoRaw[gdBase +  72 + i];
-            lv.GdStartProg [i] = lv.InfoRaw[gdBase +  96 + i];
-            lv.GdStartSeqH [i] = lv.InfoRaw[gdBase + 120 + i];
-        }
+        lv.ParseGuards();
 
         // Initialise live copies from original data
         Buffer.BlockCopy(lv.BlueType, 0, lv.LiveBlueType, 0, lv.BlueType.Length);
@@ -134,11 +129,38 @@ public class Level
         return lv;
     }
 
+    /// <summary>
+    /// The guards' block of INFO (SDLPoP level_type, from INFO[71]): tile, direction, x,
+    /// seq lo, skill, seq hi, colour — 24 bytes each. Then pos_guards (seg003): a guard
+    /// starts in the middle of its tile, standing (no saved sequence).
+    /// </summary>
+    private void ParseGuards()
+    {
+        const int gdBase = 71;
+        for (int i = 0; i < NumScreens; i++)
+        {
+            GdStartBlock[i] = InfoRaw[gdBase +   0 + i];
+            GdStartFace [i] = InfoRaw[gdBase +  24 + i];
+            GdStartX    [i] = InfoRaw[gdBase +  48 + i];
+            GdStartSeqL [i] = InfoRaw[gdBase +  72 + i];
+            GdStartProg [i] = InfoRaw[gdBase +  96 + i];
+            GdStartSeqH [i] = InfoRaw[gdBase + 120 + i];
+            GdStartColor[i] = InfoRaw[gdBase + 144 + i];
+
+            if (GdStartBlock[i] < 30)
+            {
+                GdStartX[i] = (byte)(58 + (GdStartBlock[i] % Cols) * 14 + 14);   // x_bump[col] + TILE_SIZEX
+                GdStartSeqH[i] = 0;
+            }
+        }
+    }
+
     /// <summary>Reset live state back to original loaded values (on level restart).</summary>
     public void Reset()
     {
         Buffer.BlockCopy(BlueType, 0, LiveBlueType, 0, BlueType.Length);
         Buffer.BlockCopy(BlueSpec, 0, LiveBlueSpec, 0, BlueSpec.Length);
         Buffer.BlockCopy(_linkMapOriginal, 0, LinkMap, 0, 256);   // plate timers
+        ParseGuards();
     }
 }

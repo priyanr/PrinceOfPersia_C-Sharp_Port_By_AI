@@ -3,6 +3,25 @@
 Known differences from the original and missing features, roughly in priority order.
 Remove an item when it is done and log it in `CHANGELOG.md`.
 
+## Verify (ported 2026-10-02 without the DOS files or DOSBox): sword fighting
+Everything in the 2026-10-02 CHANGELOG entry compiles and follows SDLPoP but has never run.
+- **First, the demo**: `POP_DEMO=1 --dump out 0 ".400"` against a DOSBox recording of the
+  attract mode. The kid should draw his sword at the guard, fight at skill 10 and, when the
+  guard dies, run off. The demo used to stop before the fight, so any difference here is
+  new; nothing before the guard may change.
+- Level 1 room 3 (guard at row 1, col 7; `POP_START=3,...`): the guard's sprites (does the
+  GUARD2.DAT-then-GUARD.DAT lookup in `CharSheets` find the right sheet? image indices are
+  `frame.image + 1` from resource 750), his sword (sword number of the frame, `sword_tbl`
+  offsets) and the hit-point triangles at the bottom (images 216/217 of KID.DAT, image 0 of
+  the guard sheet).
+- Fight feel: strike (Shift), parry (Up), advance/retreat, sheathe (Down); guard blocks and
+  strikes at their skill; both hurt splashes; death by sword (pushed off a ledge, stabbed
+  against a gate); the guard following through a room edge, and staying behind when the kid
+  leaves with his sword away; `bump_into_opponent` for an unarmed kid.
+- The probability tables (`DosTables.StrikeProb` ... `GuardHp`, `GuardType`) and `sword_tbl`
+  (`DosRenderer.SwordTable`) are SDLPoP's values. Find them in PRINCE.EXE (SDLPoP's
+  `options.c` lists the data-segment offsets per version) and read them from there.
+
 ## Verify (ported 2026-09-30 without the DOS files or DOSBox)
 These compile and follow SDLPoP line by line, but have never run against the real data.
 Check each in DOSBox (or at least with `--dump`) and log what you find in HISTORY.md.
@@ -50,8 +69,11 @@ Check each in DOSBox (or at least with `--dump`) and log what you find in HISTOR
   ~1400 of the ~1500 pixels still differing in the demo's room 2.
 
 ## Game features not in the DOS sim yet
-- Guards and sword fighting (level 1 guard in room 3). The sword can be picked up
-  (`HasSword`) but not drawn or used.
+- The rest of the characters: the shadow (level 4 mirror, 5 theft, 6 step, 12 final fight;
+  `autocontrol_shadow_*`, `do_init_shad`, check_killed_shadow), the mouse, Jaffar's level 13
+  events (`meet_Jaffar`, the exit opening on his death), the skeleton waking (`check_skel`),
+  guard colours (`guard_palettes`, `curr_guard_color`), loose floors falling on guards,
+  and the princess/vizier cutscenes. Sword fighting and plain guards are in (see Verify).
 - Sounds (none at all), so the feather fall lasts a fixed 225 ticks rather than until
   its sound ends.
 - "Press Button to Continue" is drawn with Raylib's font over the window, not in the

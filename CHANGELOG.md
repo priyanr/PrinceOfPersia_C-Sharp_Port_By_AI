@@ -1,5 +1,49 @@
 # Changelog
 
+## 2026-10-02 — Sword fighting and guards
+
+Ported from SDLPoP (seg002 / seg003 / seg005 / seg006 / seg008) line by line, in
+`Sim/KidEngine.Fight.cs` plus the sword branches the existing routines were missing.
+**Not run against the DOS files or DOSBox** (none in this session): it compiles and the
+logic follows SDLPoP, nothing more. Verify with the list in `PENDING.md`.
+
+- **The guard** (`Simulation.Guard`): one per room, from the level's guard block (INFO
+  from byte 71: tile, direction, x, sequence, skill, colour). `check_shadow` /
+  `enter_guard` place it when a room is entered, `leave_guard` stores it (a dead one keeps
+  its pose) and `exit_room` lets an armed guard follow the kid through the room edge
+  (`follow_guard`); `check_guard_fallout` removes one that falls out of the level.
+  `play_guard_frame` runs after the kid's frame, with the same per-frame order.
+- **Guard AI** (`autocontrol_guard_*`): notices the kid (`check_can_guard_see_kid`: 0 /
+  1 / 2), draws, advances, blocks and strikes by skill (`strikeprob`, `blockprob`,
+  `advprob`, `restrikeprob`, `impblockprob`, `refractimer`), follows a kid who drops a
+  level (`guard_follows_kid_down`). The probability tables are SDLPoP's defaults, not yet
+  read from PRINCE.EXE.
+- **Kid with a sword**: `control_with_sword`, `swordfight`, `sword_strike`, `parry`,
+  `forward_with_sword`, `back_with_sword`, `draw_sword`; `control_standing` draws the
+  sword when a guard is near (`have_sword` from level 2 on, or picked up in level 1) and
+  `back_pressed` draws while turning; Down sheathes. Shift = strike, Up = parry.
+- **Hits**: `check_sword_hurting` / `check_hurting` / `check_sword_hurt` /
+  `hurt_by_sword` — a strike's poke frame hurts, a parry frame blocks; a hit costs a
+  hit point, kills outright without a sword, and a dying fighter is pushed off a ledge
+  behind him. `bump_into_opponent` stops an unarmed kid at an armed guard.
+- **Existing routines made character-aware**: `take_hp`, `land` (guards and shadows
+  land standing, a guard dies from two rows), `start_fall` (guard / kid falling with a
+  sword), `check_bumped*` (armed characters are bumped both ways), `bumped_floor`
+  (pushed with / without sword), `is_obstacle` (only the kid goes through the mirror),
+  `proc_get_object`, `check_spiked`/`check_chomped_guard`.
+- **The demo** (level 0): the kid's sword fight is steered by the guard AI at skill 10
+  (`do_demo`), and after the guard dies he runs for the exit (`on_guard_killed`).
+- **Drawing**: guard (GUARD/FAT/SKEL/VIZIER.DAT by `tbl_guard_type`; `GUARD1/2.DAT` first
+  for regular guards), swords (PRINCE.DAT 700, `sword_tbl`), hurt splashes (filed under
+  tile -1, drawn last) and the hit points along the bottom (the kid's from the left, a
+  guard's from the right; one left blinks) in the framebuffer, so dumps show them.
+- The live game runs at 10 ticks a second while the kid has his sword out (fight_speed 6
+  against base_speed 5).
+- Not ported yet: guard colours (`guard_palettes`), sounds, the shadow's scripts (levels
+  4, 5, 6, 12), the mouse, Jaffar's level events, the skeleton waking (`check_skel`),
+  loose floors falling on guards. Rooms where the shadow belongs (level 12 room 15,
+  level 6 room 1, level 5 room 24) get no guard.
+
 ## 2026-10-01 — Level 12's hidden bridge and uniting with the shadow
 
 - **Hidden floors** (check_on_floor's special event, seg006): on level 12, once the kid
