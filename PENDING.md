@@ -80,7 +80,6 @@ Check each in DOSBox (or at least with `--dump`) and log what you find in HISTOR
   original's status line, and there is no death music (so no wait for it).
 
 ## Housekeeping
-- `AGENTS.md` still describes the legacy Apple II engine.
 - The Apple II-era files are no longer referenced: POPGame builds with all of these
   removed (checked 2026-09-30): `Characters/*`, `Data/Apple2Image.cs`,
   `Dos/DosSpriteSheet.cs`, `Engine/Constants.cs`, `Engine/GameLoop.cs`,
