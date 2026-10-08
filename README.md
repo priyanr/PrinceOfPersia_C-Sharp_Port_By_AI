@@ -76,6 +76,19 @@ The Apple II source isn't included. To use the references in `CLAUDE.md`, clone
 [jmechner/Prince-of-Persia-Apple-II](https://github.com/jmechner/Prince-of-Persia-Apple-II)
 into `originalcode/`. That folder is gitignored.
 
+## Contributing: let Claude test against DOSBox
+
+Fidelity work here means comparing the remake with the real DOS game. If you want to
+improve the project with Claude Code, install the **DOSBox control skill** so Claude can
+launch the original game in DOSBox, take screenshots, send keystrokes and close it, then
+diff the result against `POPGame --dump` output on its own:
+
+<https://github.com/priyanr/DosBoxControl-Claude-Skill>
+
+Follow that repo's README to build and install it (needs Windows and DOSBox 0.74-3). The
+project-specific setup (port, video driver, crop, demo comparison) is in the
+"Comparing against DOSBox" section of [`CLAUDE.md`](CLAUDE.md).
+
 ## Credits
 
 - **Jordan Mechner** created Prince of Persia and published the original Apple II source:
